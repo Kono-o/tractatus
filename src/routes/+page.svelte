@@ -15,6 +15,9 @@
     MAX_USERNAME_LEN,
     sanitizePasswordInput,
     sanitizeUsernameInput,
+    type Essay,
+    slugifyTitle,
+    estimateReadTimeMinutes,
   } from '$lib/db';
   import AuthScreen from '$lib/components/AuthScreen.svelte';
   // IMPORTANT: updater (and thus all @capacitor/* modules) must NOT be statically imported.
@@ -43,8 +46,29 @@
     LogOut,
     Pencil,
     RefreshCw,
+    Save,
     Trash2,
+    Undo2,
+    Redo2,
+    Bold,
+    Italic,
+    Strikethrough,
+    Highlighter,
+    Link,
+    Image,
+    Code,
+    Code2,
+    Minus,
+    Quote,
+    AlignLeft,
+    AlignCenter,
+    AlignRight,
+    Subscript,
+    Superscript,
+    Sigma,
+    ArrowLeft,
     X,
+    BookOpen,
   } from '@lucide/svelte';
 
   const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -85,7 +109,7 @@
   let bootOverlayVisible = $state(false);
   let bootOverlayExiting = $state(false);
   let bootAccountReveal = $state(false);
-  let stageRevealActive = $state(true);
+  let stageRevealActive = $state(false);
   const BOOT_ACCOUNT_REVEAL_HOLD_MS = 900;
 
   // Account / settings panel (ported from Lift Tracker)
@@ -140,6 +164,88 @@
   let postUpdateVersion = $state('');
   let postUpdateNotes = $state('');
   let didRunStartupUpdateCheck = $state(false);
+
+  // ============================================
+  // WRITINGS (essays) + live editor state
+  // ============================================
+  let essays = $state<Essay[]>([]);
+  let essaysLoading = $state(false);
+  let essaysLoadedOnce = $state(false);
+
+  let isWriting = $state(false);
+  let currentEssayId = $state<string | null>(null);
+  let editorTitle = $state('');
+  let editorContent = $state('');
+  let editorSlug = $state('');
+  let editorInitialSnapshot = $state<{ title: string; content: string; slug: string } | null>(null);
+
+  let isSaving = $state(false);
+  let lastSavedAt = $state<number | null>(null);
+  let saveError = $state<string | null>(null);
+  let deleteHoldProgress = $state(0);
+  let deleteHoldTimer: ReturnType<typeof setInterval> | null = null;
+  let deleteTapPulseActive = $state(false);
+
+  // Undo / Redo stacks (simple content snapshots)
+  let undoStack = $state<Array<{ title: string; content: string; slug: string }>>([]);
+  let redoStack = $state<Array<{ title: string; content: string; slug: string }>>([]);
+  const MAX_HISTORY = 48;
+
+  // Auto-save timer
+  let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let isDirty = $derived.by(() => {
+    if (!editorInitialSnapshot) return false;
+    return (
+      editorTitle !== editorInitialSnapshot.title ||
+      editorContent !== editorInitialSnapshot.content ||
+      editorSlug !== editorInitialSnapshot.slug
+    );
+  });
+
+  let writingCount = $derived(essays.length);
+  let drafts = $derived(essays.filter(e => !e.is_public));
+  let published = $derived(essays.filter(e => e.is_public));
+
+  let editorWordCount = $derived((editorContent || '').trim().split(/\s+/).filter(Boolean).length);
+  let editorReadMins = $derived(estimateReadTimeMinutes(editorContent));
+
+  let currentEssay = $derived(essays.find(e => e.id === currentEssayId) ?? null);
+  let isPublished = $derived(!!(currentEssay?.is_public || (currentEssayId && editorSlug && essays.some(e => e.id === currentEssayId && e.is_public))));
+
+  // For the CTA label transform
+  let mainActionLabel = $derived(isPublished ? 'UPDATE' : 'PUBLISH');
+
+  // View modes for main menu
+  let viewMode = $state<'feed' | 'library'>('feed');
+  let publicFeed = $state<Essay[]>([]);
+  let publicFeedLoading = $state(false);
+
+  /** Substack-style excerpt: strip basic markdown and truncate */
+  function getExcerpt(content: string, maxLength = 140): string {
+    if (!content) return '';
+    let text = content
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`[^`]+`/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[#*_~>]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text.length > maxLength) text = text.slice(0, maxLength).trim() + '…';
+    return text;
+  }
+
+  // Lift Tracker-style primary CTA (for WRITE button matching START WORKOUT)
+  const WRITE_CTA = 'WRITE';
+  const workoutCenterBtnClass =
+    'workout-cta-center font-sans col-span-3 rounded-xl flex items-center justify-center text-center border-2 hover:brightness-110 group relative';
+  const workoutCenterLabelClass =
+    'workout-cta-label transition-[letter-spacing] group-hover:tracking-[0.2em]';
+  const CENTER_CTA_MAX_CH = 16;
+
+  function ctaChStyle(text: string, maxCh: number): string {
+    const ch = Math.min(Math.max(text.length, 1), maxCh);
+    return `--cta-ch:${ch}`;
+  }
 
   $effect(() => {
     if (showPostUpdate) {
@@ -982,6 +1088,547 @@
       avatarSeed = null;
     }
   });
+
+  // ============================================
+  // WRITINGS HELPERS + LIVE EDITOR
+  // ============================================
+
+  async function loadEssays() {
+    if (!currentUser) {
+      essays = [];
+      return;
+    }
+    const wasInitial = !essaysLoadedOnce;
+    if (wasInitial) essaysLoading = true;
+    try {
+      const list = await db.listEssays();
+      essays = list;
+      essaysLoadedOnce = true;
+    } catch (e) {
+      console.warn('[essays] load failed', e);
+    } finally {
+      if (wasInitial) essaysLoading = false;
+    }
+  }
+
+  async function loadPublicFeed() {
+    if (!currentUser) {
+      publicFeed = [];
+      return;
+    }
+    publicFeedLoading = true;
+    try {
+      publicFeed = await db.listPublicFeed();
+    } catch (e) {
+      console.warn('[feed] load failed', e);
+    } finally {
+      publicFeedLoading = false;
+    }
+  }
+
+  function pushHistory() {
+    // Push current editor state to undo, clear redo
+    const snap = { title: editorTitle, content: editorContent, slug: editorSlug };
+    // Avoid pushing identical
+    const last = undoStack[undoStack.length - 1];
+    if (last && last.title === snap.title && last.content === snap.content && last.slug === snap.slug) {
+      return;
+    }
+    undoStack = [...undoStack.slice(-(MAX_HISTORY - 1)), snap];
+    redoStack = [];
+  }
+
+  function applySnapshot(snap: { title: string; content: string; slug: string }) {
+    editorTitle = snap.title;
+    editorContent = snap.content;
+    editorSlug = snap.slug;
+  }
+
+  function undo() {
+    if (undoStack.length === 0) return;
+    const current = { title: editorTitle, content: editorContent, slug: editorSlug };
+    const prev = undoStack[undoStack.length - 1];
+    redoStack = [...redoStack, current];
+    undoStack = undoStack.slice(0, -1);
+    applySnapshot(prev);
+    scheduleAutoSave();
+  }
+
+  function redo() {
+    if (redoStack.length === 0) return;
+    const current = { title: editorTitle, content: editorContent, slug: editorSlug };
+    const next = redoStack[redoStack.length - 1];
+    undoStack = [...undoStack, current];
+    redoStack = redoStack.slice(0, -1);
+    applySnapshot(next);
+    scheduleAutoSave();
+  }
+
+  function resetEditor() {
+    editorTitle = '';
+    editorContent = '';
+    editorSlug = '';
+    editorInitialSnapshot = null;
+    undoStack = [];
+    redoStack = [];
+    lastSavedAt = null;
+    saveError = null;
+    currentEssayId = null;
+    isSaving = false;
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = null;
+    }
+    deleteHoldProgress = 0;
+    stopDeleteHold();
+  }
+
+  function stopDeleteHold() {
+    if (deleteHoldTimer) clearInterval(deleteHoldTimer);
+    deleteHoldTimer = null;
+    deleteHoldProgress = 0;
+    deleteTapPulseActive = false;
+  }
+
+  function startDeleteHold(e: Event) {
+    if (e.cancelable) e.preventDefault();
+    if (isSaving || !currentEssayId) return;
+    deleteTapPulseActive = true;
+    const startTime = Date.now();
+    deleteHoldTimer = setInterval(() => {
+      deleteHoldProgress = Math.min(((Date.now() - startTime) / 1100) * 100, 100);
+      if (deleteHoldProgress >= 100) {
+        clearInterval(deleteHoldTimer!);
+        deleteHoldTimer = null;
+        deleteHoldProgress = 0;
+        deleteTapPulseActive = false;
+        void performDelete();
+      }
+    }, 16);
+  }
+
+  function onDeleteTapPulseEnd(e: AnimationEvent) {
+    if (e.animationName === 'hold-cancel-tap-pulse') deleteTapPulseActive = false;
+  }
+
+  async function performDelete() {
+    if (!currentEssayId) return;
+    const idToDelete = currentEssayId;
+    isSaving = true;
+    saveError = null;
+    try {
+      await db.deleteEssay(idToDelete);
+      essays = essays.filter(e => e.id !== idToDelete);
+      resetEditor();
+      isWriting = false;
+    } catch (e: any) {
+      saveError = 'Delete failed. Try again.';
+      console.error(e);
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  function generateSlugFromTitle(force = false) {
+    if (!force && editorSlug && editorSlug !== slugifyTitle(editorTitle)) return;
+    editorSlug = slugifyTitle(editorTitle);
+  }
+
+  async function ensureUniqueSlug(slug: string, excludeId: string | null): Promise<string> {
+    let candidate = slug || 'untitled';
+    let suffix = 2;
+    while (!(await db.isSlugAvailable(candidate, excludeId))) {
+      candidate = `${slug}-${suffix}`;
+      suffix += 1;
+      if (suffix > 99) break; // safety
+    }
+    return candidate;
+  }
+
+  function scheduleAutoSave() {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      if (isWriting && (editorTitle.trim() || editorContent.trim())) {
+        void autoSaveDraft();
+      }
+    }, 850);
+  }
+
+  async function autoSaveDraft() {
+    if (!isWriting || isSaving) return;
+    // Only auto-save if dirty
+    if (!isDirty) return;
+    await saveCurrent(false); // private
+  }
+
+  async function saveCurrent(forcePublic: boolean) {
+    if (isSaving) return;
+    const title = (editorTitle || 'Untitled').trim();
+    if (!title && !editorContent.trim()) {
+      saveError = 'Add a title or some text first.';
+      return;
+    }
+    saveError = null;
+    isSaving = true;
+
+    let targetSlug = editorSlug.trim() || slugifyTitle(title);
+    const exclude = currentEssayId;
+
+    try {
+      targetSlug = await ensureUniqueSlug(targetSlug, exclude);
+
+      const saved = await db.saveEssay({
+        id: currentEssayId,
+        title,
+        content: editorContent,
+        slug: targetSlug,
+        is_public: forcePublic,
+      });
+
+      // Update local list
+      const idx = essays.findIndex(e => e.id === saved.id);
+      if (idx >= 0) {
+        essays[idx] = saved;
+      } else {
+        essays = [saved, ...essays];
+      }
+
+      currentEssayId = saved.id;
+      editorSlug = saved.slug;
+      editorTitle = saved.title;
+      // Keep content as user has it (in case server trims etc but no)
+
+      lastSavedAt = Date.now();
+      editorInitialSnapshot = { title: saved.title, content: editorContent, slug: saved.slug };
+      // After explicit save we can trim history a little
+      undoStack = undoStack.slice(-12);
+
+      // Refresh from DB to guarantee the essay is persisted and visible in Library
+      void loadEssays().catch(() => {});
+
+      // If we just published, reflect in local state
+      if (forcePublic) {
+        // essays already updated
+      }
+    } catch (e: any) {
+      console.error('save essay failed', e);
+      saveError = e?.message || 'Could not save. Check connection.';
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  async function handleSaveDraft() {
+    saveError = null;
+    await saveCurrent(false);
+  }
+
+  async function handlePublish() {
+    saveError = null;
+    await saveCurrent(true);
+  }
+
+  function openEditorForEssay(essay: Essay) {
+    resetEditor();
+    currentEssayId = essay.id;
+    editorTitle = essay.title;
+    editorContent = essay.content;
+    editorSlug = essay.slug;
+    editorInitialSnapshot = { title: essay.title, content: essay.content, slug: essay.slug };
+    undoStack = [];
+    redoStack = [];
+    isWriting = true;
+    lastSavedAt = Date.now();
+    // Seed one history entry
+    undoStack = [{ title: essay.title, content: essay.content, slug: essay.slug }];
+    // focus title or content next tick (in markup we can use autofocus on enter)
+  }
+
+  async function enterNewWrite() {
+    resetEditor();
+    isWriting = true;
+    editorTitle = '';
+    editorContent = '';
+    editorSlug = '';
+    const nowStr = new Date().toISOString();
+    // Create a transient initial so dirty detection works after first type
+    editorInitialSnapshot = { title: '', content: '', slug: '' };
+    undoStack = [];
+    // Immediately create a draft placeholder? No — wait for first meaningful save.
+    // But to have an id fast for user, we can create empty on first auto or explicit.
+    // For now: do not create until first Save/Publish.
+  }
+
+  async function exitWriting() {
+    if (!isWriting) return;
+    // Auto-save one last time if dirty and has content
+    if (isDirty && (editorTitle.trim() || editorContent.trim())) {
+      await saveCurrent(false);
+    }
+    resetEditor();
+    isWriting = false;
+    // Refresh list in background
+    void loadEssays();
+  }
+
+  async function handleWriteButton() {
+    if (isWriting) {
+      // In editor: the CTA is publish — handled separately
+      return;
+    }
+    await enterNewWrite();
+  }
+
+  // Textarea ref for caret ops
+  let textareaEl: HTMLTextAreaElement | null = null;
+
+  function getTextarea(): HTMLTextAreaElement | null {
+    return textareaEl;
+  }
+
+  function saveSelection() {
+    const ta = getTextarea();
+    if (!ta) return { start: 0, end: 0 };
+    return { start: ta.selectionStart ?? 0, end: ta.selectionEnd ?? 0 };
+  }
+
+  function restoreSelection(start: number, end: number) {
+    const ta = getTextarea();
+    if (!ta) return;
+    ta.focus();
+    ta.setSelectionRange(start, end);
+  }
+
+  function wrapSelection(before: string, after: string = before) {
+    const ta = getTextarea();
+    if (!ta) return;
+    const { start, end } = saveSelection();
+    const val = ta.value;
+    const selected = val.slice(start, end);
+    const newText = before + selected + after;
+    const newVal = val.slice(0, start) + newText + val.slice(end);
+    // push history before mutate for good undo
+    pushHistory();
+    editorContent = newVal;
+    const newCaret = start + before.length + selected.length;
+    // defer restore
+    requestAnimationFrame(() => restoreSelection(newCaret, newCaret));
+    scheduleAutoSave();
+  }
+
+  function insertAtCursor(text: string, selectOffset = 0) {
+    const ta = getTextarea();
+    if (!ta) {
+      editorContent = (editorContent || '') + text;
+      scheduleAutoSave();
+      return;
+    }
+    const { start, end } = saveSelection();
+    const val = ta.value;
+    pushHistory();
+    const newVal = val.slice(0, start) + text + val.slice(end);
+    editorContent = newVal;
+    const caret = start + text.length + selectOffset;
+    requestAnimationFrame(() => restoreSelection(caret, caret));
+    scheduleAutoSave();
+  }
+
+  function toggleBlockPrefix(prefix: string) {
+    const ta = getTextarea();
+    if (!ta) return;
+    const { start } = saveSelection();
+    const val = ta.value;
+    // find line start
+    let lineStart = val.lastIndexOf('\n', start - 1) + 1;
+    if (lineStart < 0) lineStart = 0;
+    const lineEnd = val.indexOf('\n', start);
+    const currentLine = val.slice(lineStart, lineEnd === -1 ? val.length : lineEnd);
+
+    pushHistory();
+
+    let newLine: string;
+    if (currentLine.startsWith(prefix)) {
+      newLine = currentLine.slice(prefix.length);
+    } else if (/^#{1,6}\s/.test(currentLine) && prefix.startsWith('#')) {
+      // replace heading level
+      newLine = currentLine.replace(/^#{1,6}\s/, prefix);
+    } else {
+      newLine = prefix + currentLine;
+    }
+
+    const newVal = val.slice(0, lineStart) + newLine + val.slice(lineEnd === -1 ? val.length : lineEnd);
+    editorContent = newVal;
+
+    // keep caret roughly in place
+    const delta = newLine.length - currentLine.length;
+    requestAnimationFrame(() => restoreSelection(start + delta, start + delta));
+    scheduleAutoSave();
+  }
+
+  function insertLink() {
+    const ta = getTextarea();
+    const { start, end } = saveSelection();
+    const selected = (ta ? editorContent.slice(start, end) : '') || 'text';
+    const url = prompt('Link URL (https://...)', 'https://');
+    if (!url) return;
+    const md = `[${selected}](${url})`;
+    if (ta) {
+      pushHistory();
+      const val = editorContent;
+      editorContent = val.slice(0, start) + md + val.slice(end);
+      const newEnd = start + md.length;
+      requestAnimationFrame(() => restoreSelection(start + 1, start + selected.length + 1)); // select the text part
+    } else {
+      insertAtCursor(md);
+    }
+    scheduleAutoSave();
+  }
+
+  function insertImageLink() {
+    const url = prompt('Image URL (https://...)', 'https://');
+    if (!url) return;
+    const alt = prompt('Alt text (optional)', '') || '';
+    insertAtCursor(`![${alt}](${url})`);
+  }
+
+  function insertCodeBlock() {
+    wrapSelection('\n```\n', '\n```\n');
+  }
+
+  function insertInlineCode() {
+    wrapSelection('`', '`');
+  }
+
+  function insertDivider() {
+    insertAtCursor('\n\n---\n\n');
+  }
+
+  function insertQuote() {
+    toggleBlockPrefix('> ');
+  }
+
+  function insertFootnote() {
+    // Simple: insert marker at cursor + definition at end
+    const num = (editorContent.match(/\[\^(\d+)\]/g) || []).length + 1;
+    const marker = `[^${num}]`;
+    const def = `\n\n[^${num}]: Your footnote here.\n`;
+    const ta = getTextarea();
+    if (ta) {
+      const { start } = saveSelection();
+      pushHistory();
+      const val = editorContent;
+      editorContent = val.slice(0, start) + marker + val.slice(start) + def;
+      requestAnimationFrame(() => restoreSelection(start + marker.length, start + marker.length));
+    } else {
+      editorContent = (editorContent || '') + marker + def;
+    }
+    scheduleAutoSave();
+  }
+
+  function wrapLatex(inline = true) {
+    if (inline) {
+      wrapSelection('$', '$');
+    } else {
+      wrapSelection('\n$$\n', '\n$$\n');
+    }
+  }
+
+  function applyAlign(align: 'left' | 'center' | 'right') {
+    // Use a simple convention that render can handle:
+    // ::: center\ntext\n:::
+    const block = `\n::: ${align}\n\n\n:::\n`;
+    insertAtCursor(block, -5); // caret inside
+  }
+
+  function insertHeading(level: number) {
+    const prefix = '#'.repeat(Math.max(1, Math.min(6, level))) + ' ';
+    toggleBlockPrefix(prefix);
+  }
+
+  function applyHighlight() {
+    wrapSelection('==', '==');
+  }
+
+  function applySub() {
+    wrapSelection('~', '~');
+  }
+
+  function applySup() {
+    wrapSelection('^', '^');
+  }
+
+  // Keyboard shortcuts inside editor textarea
+  function onEditorKeydown(e: KeyboardEvent) {
+    const meta = e.ctrlKey || e.metaKey;
+    if (!meta) return;
+
+    if (e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        redo();
+      } else {
+        undo();
+      }
+      return;
+    }
+    if (e.key.toLowerCase() === 'y') {
+      e.preventDefault();
+      redo();
+      return;
+    }
+    if (e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      wrapSelection('**', '**');
+      return;
+    }
+    if (e.key.toLowerCase() === 'i') {
+      e.preventDefault();
+      wrapSelection('*', '*');
+      return;
+    }
+    if (e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      insertLink();
+      return;
+    }
+    if (e.key === '`' || e.key === '~') {
+      // allow user, no prevent
+    }
+  }
+
+  function onEditorInput() {
+    saveError = null;
+    // Record history occasionally (not every keystroke for perf)
+    // We push on explicit formatting and also here on larger pauses via autoSave schedule.
+    // For undo button to be useful, push every N chars or on format.
+    scheduleAutoSave();
+  }
+
+  // When entering editor from list or new, focus the title or content
+  function focusEditorTitle(node: HTMLInputElement) {
+    // called via use:
+    node.focus();
+    node.select();
+  }
+
+  // Load essays after initial app data + when signed in
+  $effect(() => {
+    if (currentUser && hasInitialLoad && !essaysLoadedOnce) {
+      void loadEssays();
+      void loadPublicFeed();
+    }
+    if (!currentUser) {
+      essays = [];
+      publicFeed = [];
+      essaysLoadedOnce = false;
+      if (isWriting) {
+        resetEditor();
+        isWriting = false;
+      }
+    }
+  });
+
+  // Keep writings count fresh in chip (already reactive via writingCount)
 </script>
 
 {#snippet writingsChip(ghost = false, reveal = false)}
@@ -997,7 +1644,7 @@
         class:boot-panel-placeholder={ghost}
       >
         <Pencil class="size-3 shrink-0 {ghost ? 'boot-panel-placeholder__ghost' : ''}" aria-hidden="true" />
-        <span class="leading-none {ghost ? 'boot-panel-placeholder__ghost' : ''}">0 writings</span>
+        <span class="leading-none {ghost ? 'boot-panel-placeholder__ghost' : ''}">{writingCount} writing{writingCount === 1 ? '' : 's'}</span>
       </span>
     </div>
   </div>
@@ -1168,9 +1815,19 @@
   <div class="app-stage-scroll flex-1 min-h-0 flex flex-col overflow-hidden">
   <div
     class="app-stage-reveal app-stack-gap flex flex-col flex-1 min-h-0 w-full overflow-hidden"
-    class:app-stage-reveal--active={stageRevealActive || !currentUser}
+    class:app-stage-reveal--active={stageRevealActive || (!isAuthLoading && !currentUser)}
   >
-  {#if currentUser}
+  {#if isAuthLoading}
+    <!-- Don't show sign in / sign up screen until we have resolved the initial auth state.
+         This prevents the auth form from flashing on app launch / refresh when the user is already logged in. -->
+    <div class="flex-1 min-h-0 flex items-center justify-center">
+      <div class="boot-panel-avatar-spinner" style="width: 2.25rem; height: 2.25rem; border-width: 3px;"></div>
+    </div>
+  {:else if !currentUser}
+    <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <AuthScreen onAuthenticated={handleAuthSuccess} />
+    </div>
+  {:else}
   <div class="app-stage-sticky app-stack-gap shrink-0 flex flex-col">
   <div class="week-calendar-swipe rounded-xl border border-[#1e1e1e] bg-[#141414] overflow-hidden">
     <div class="flex items-center gap-2 min-h-8 px-2 py-1.5 border-b border-[#1e1e1e] bg-[#111] text-[10px] tracking-[1px]">
@@ -1215,13 +1872,364 @@
       <div class="overflow-hidden min-h-0 pointer-events-none"></div>
     </div>
   </div>
-  </div>
+
+  <!-- ACTION BAR: button trio (or single WRITE) directly below the header box, matching Lift Tracker workout CTA placement -->
+  {#if currentUser}
+    <div class="px-1 pt-1 pb-1.5">
+      {#if isWriting}
+        {#if saveError}
+          <p class="text-[10px] text-red-400 px-3 pb-1">{saveError}</p>
+        {/if}
+        <!-- SAVE | PUBLISH | DELETE trio -->
+        <div class="app-cta-grid">
+          <button
+            type="button"
+            class="workout-cta-side col-span-1 border bg-[#0d0d0d] border-[#1e1e1e] text-white hover:border-white/40 rounded-xl"
+            style="height: var(--cta-height);"
+            disabled={isSaving || !currentEssayId && !(editorTitle.trim() || editorContent.trim())}
+            onclick={() => void handleSaveDraft()}
+          >
+            <span class="workout-cta-side-content">
+              <Save class="workout-cta-side-icon" strokeWidth={2.25} />
+              <span class="workout-cta-label workout-cta-label-side" style="--cta-ch-side-max:6">SAVE</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="{workoutCenterBtnClass} border-transparent bg-white text-black"
+            disabled={isSaving || (!editorTitle.trim() && !editorContent.trim())}
+            onclick={() => void handlePublish()}
+          >
+            <span
+              class={workoutCenterLabelClass}
+              style={ctaChStyle(mainActionLabel, CENTER_CTA_MAX_CH)}
+            >
+              {mainActionLabel}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="workout-cta-side col-span-1 group border bg-[#0d0d0d] border-[#1e1e1e] text-[#fda4af] hover:border-red-400/60 rounded-xl relative overflow-hidden {deleteTapPulseActive ? 'hold-cancel-tap-pulse' : ''}"
+            style="height: var(--cta-height);"
+            disabled={isSaving || !currentEssayId}
+            onmousedown={startDeleteHold}
+            onmouseup={stopDeleteHold}
+            onmouseleave={stopDeleteHold}
+            ontouchstart={startDeleteHold}
+            ontouchend={stopDeleteHold}
+            onanimationend={onDeleteTapPulseEnd}
+          >
+            <div class="absolute inset-0 z-0 bg-red-900/50 transition-all duration-[20ms]" style="width: {deleteHoldProgress}%;"></div>
+            <span class="workout-cta-side-content relative z-10">
+              <Trash2 class="workout-cta-side-icon" strokeWidth={2.25} />
+              <span class="workout-cta-label workout-cta-label-side" style="--cta-ch-side-max:6">DELETE</span>
+            </span>
+          </button>
+        </div>
+      {:else}
+        <!-- Library (left) | WRITE (center) | empty (right) -->
+        <div class="app-cta-grid">
+          <button
+            type="button"
+            class="workout-cta-side col-span-1 border bg-[#0d0d0d] border-[#1e1e1e] text-white hover:border-white/40 rounded-xl"
+            style="height: var(--cta-height);"
+            onclick={() => { viewMode = viewMode === 'library' ? 'feed' : 'library'; }}
+          >
+            <span class="workout-cta-side-content">
+              <BookOpen class="workout-cta-side-icon" strokeWidth={2.25} />
+              <span class="workout-cta-label workout-cta-label-side" style="--cta-ch-side-max:7">
+                {viewMode === 'library' ? 'FEED' : 'LIBRARY'}
+              </span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="{workoutCenterBtnClass} border-transparent bg-white text-black"
+            onclick={() => void handleWriteButton()}
+          >
+            <span
+              class={workoutCenterLabelClass}
+              style={ctaChStyle(WRITE_CTA, CENTER_CTA_MAX_CH)}
+            >
+              {WRITE_CTA}
+            </span>
+          </button>
+
+          <div class="workout-cta-empty"></div>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- MAIN CONTENT BELOW ACTION BAR (editor body or writings list) -->
+  {#if isWriting}
+    <!-- LIVE EDITOR BODY (below the header + trio) -->
+    <div class="flex flex-col flex-1 min-h-0 overflow-hidden px-1 pt-1">
+      <!-- Small editor sub-header (back + stats) -->
+      <div class="flex items-center gap-2 mb-2 px-1">
+        <button
+          type="button"
+          class="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white active:text-white transition px-2 py-1 -ml-1 rounded"
+          onclick={() => void exitWriting()}
+          disabled={isSaving}
+        >
+          <ArrowLeft class="size-4" />
+          <span class="text-[10px] tracking-widest">BACK</span>
+        </button>
+        <div class="flex-1" />
+        <div class="text-[10px] text-zinc-500 tabular-nums font-mono">
+          {editorWordCount} words · ~{editorReadMins}m
+        </div>
+      </div>
+
+      <div class="editor-wrap flex-1 min-h-0 flex flex-col">
+        <!-- Title -->
+        <input
+          type="text"
+          class="editor-title-input"
+          placeholder="Title"
+          bind:value={editorTitle}
+          oninput={() => { saveError = null; generateSlugFromTitle(); scheduleAutoSave(); }}
+          onblur={() => { generateSlugFromTitle(true); }}
+          use:focusEditorTitle
+          disabled={isSaving}
+        />
+
+        <!-- Slug row -->
+        <div class="editor-slug-row">
+          <span class="shrink-0">slug /</span>
+          <input
+            type="text"
+            class="editor-slug-input"
+            bind:value={editorSlug}
+            oninput={() => { saveError = null; scheduleAutoSave(); }}
+            placeholder="auto-from-title"
+            disabled={isSaving}
+          />
+          <button
+            type="button"
+            class="text-[10px] px-2 py-0.5 border border-[#27272a] rounded hover:bg-[#1a1a1a] active:bg-[#222] disabled:opacity-50"
+            onclick={() => generateSlugFromTitle(true)}
+            disabled={isSaving}
+          >REGEN</button>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="editor-toolbar">
+          <!-- Headings -->
+          <button class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(1)} title="H1" disabled={isSaving}>H1</button>
+          <button class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(2)} title="H2" disabled={isSaving}>H2</button>
+          <button class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(3)} title="H3" disabled={isSaving}>H3</button>
+
+          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+
+          <button class="editor-tool-btn" onclick={() => wrapSelection('**','**')} title="Bold" disabled={isSaving}><Bold class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={() => wrapSelection('*','*')} title="Italic" disabled={isSaving}><Italic class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={() => wrapSelection('~~','~~')} title="Strike" disabled={isSaving}><Strikethrough class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={applyHighlight} title="Highlight" disabled={isSaving}><Highlighter class="size-3.5" /></button>
+
+          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+
+          <button class="editor-tool-btn" onclick={applySup} title="Superscript" disabled={isSaving}><Superscript class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={applySub} title="Subscript" disabled={isSaving}><Subscript class="size-3.5" /></button>
+
+          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+
+          <button class="editor-tool-btn" onclick={insertLink} title="Link" disabled={isSaving}><Link class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={insertImageLink} title="Image link (URL only)" disabled={isSaving}><Image class="size-3.5" /></button>
+
+          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+
+          <button class="editor-tool-btn" onclick={insertInlineCode} title="Inline code" disabled={isSaving}><Code class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={insertCodeBlock} title="Code block" disabled={isSaving}><Code2 class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={insertDivider} title="Divider" disabled={isSaving}><Minus class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={insertQuote} title="Quote / poetry" disabled={isSaving}><Quote class="size-3.5" /></button>
+
+          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+
+          <button class="editor-tool-btn" onclick={() => wrapLatex(true)} title="Inline LaTeX $" disabled={isSaving}><Sigma class="size-3.5" /></button>
+          <button class="editor-tool-btn--wide editor-tool-btn" onclick={() => wrapLatex(false)} title="Block LaTeX $$" disabled={isSaving}>$$</button>
+
+          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+
+          <button class="editor-tool-btn" onclick={() => applyAlign('left')} title="Align left" disabled={isSaving}><AlignLeft class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={() => applyAlign('center')} title="Align center" disabled={isSaving}><AlignCenter class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={() => applyAlign('right')} title="Align right" disabled={isSaving}><AlignRight class="size-3.5" /></button>
+
+          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+
+          <button class="editor-tool-btn" onclick={insertFootnote} title="Footnote" disabled={isSaving}>[^]</button>
+
+          <div class="flex-1" />
+
+          <!-- Undo / Redo -->
+          <button class="editor-tool-btn" onclick={undo} disabled={isSaving || undoStack.length === 0} title="Undo (Ctrl/Cmd+Z)"><Undo2 class="size-3.5" /></button>
+          <button class="editor-tool-btn" onclick={redo} disabled={isSaving || redoStack.length === 0} title="Redo (Ctrl/Cmd+Shift+Z)"><Redo2 class="size-3.5" /></button>
+        </div>
+
+        <!-- The actual live markdown source editor (like obsidian source mode + substack flow) -->
+        <textarea
+          bind:this={textareaEl}
+          class="editor-textarea no-scrollbar"
+          placeholder="Start writing... Use the toolbar or type Markdown directly.&#10;&#10;# Heading&#10;**bold** *italic* ~~strike~~ ==highlight==&#10;> quote / poetry&#10;`code`&#10;```&#10;block&#10;```&#10;---&#10;$E=mc^2$&#10;[^1] footnote marker"
+          bind:value={editorContent}
+          onkeydown={onEditorKeydown}
+          oninput={onEditorInput}
+          disabled={isSaving}
+        ></textarea>
+
+        <div class="editor-meta-bar">
+          <div class="editor-status">
+            {#if isSaving}
+              Saving…
+            {:else if lastSavedAt}
+              Saved {Math.max(0, Math.floor((Date.now() - lastSavedAt) / 1000))}s ago
+            {:else}
+              Draft
+            {/if}
+          </div>
+          <div>
+            {editorReadMins} min read
+          </div>
+        </div>
+      </div>
+    </div>
+  {:else if viewMode === 'library'}
+    <!-- YOUR LIBRARY (own drafts + published) -->
+    <div class="flex flex-col flex-1 min-h-0 overflow-hidden px-1 pt-1">
+      <div class="mb-3 px-1">
+        <span class="text-[9px] font-semibold tracking-[1.75px] text-amber-400/70">YOUR LIBRARY</span>
+      </div>
+
+      <div class="feed-list">
+        {#if essaysLoading && !essaysLoadedOnce}
+          <div class="writing-empty py-8">Loading your writings…</div>
+        {:else if essays.length === 0}
+          <div class="writing-empty py-8">
+            <div class="mb-1 text-zinc-300">No writings yet in your library.</div>
+            <div class="text-[11px] text-zinc-500">Tap WRITE to create your first essay.</div>
+          </div>
+        {:else}
+          {#if drafts.length > 0}
+            <div class="px-1 pb-1 text-[9px] tracking-[1.5px] text-amber-400/70 font-medium">DRAFTS</div>
+            {#each drafts as essay (essay.id)}
+              <button 
+                class="feed-entry block text-left w-full rounded-xl" 
+                onclick={() => openEditorForEssay(essay)}
+              >
+                <div class="feed-title text-[17px] leading-tight font-semibold text-white mb-1.5 line-clamp-2">
+                  {essay.title || 'Untitled'}
+                </div>
+                <div class="flex items-center justify-between text-[11px]">
+                  <span class="feed-badge feed-badge--draft">DRAFT</span>
+                  <span class="text-zinc-500">
+                    {new Date(essay.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {estimateReadTimeMinutes(essay.content)} min read
+                  </span>
+                </div>
+              </button>
+            {/each}
+          {/if}
+
+          {#if published.length > 0}
+            <div class="px-1 pt-2 pb-1 text-[9px] tracking-[1.5px] text-emerald-400/70 font-medium">PUBLISHED</div>
+            {#each published as essay (essay.id)}
+              <button 
+                class="feed-entry block text-left w-full rounded-xl" 
+                onclick={() => openEditorForEssay(essay)}
+              >
+                <div class="feed-title text-[17px] leading-tight font-semibold text-white mb-1.5 line-clamp-2">
+                  {essay.title || 'Untitled'}
+                </div>
+                <div class="flex items-center justify-between text-[11px]">
+                  <span class="feed-badge feed-badge--public">PUBLIC</span>
+                  <span class="text-zinc-500">
+                    {new Date(essay.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {estimateReadTimeMinutes(essay.content)} min read
+                  </span>
+                </div>
+              </button>
+            {/each}
+          {/if}
+        {/if}
+      </div>
+    </div>
   {:else}
-    <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
-      <AuthScreen onAuthenticated={handleAuthSuccess} />
+    <!-- PUBLIC FEED: other users' published essays (newest first), excluding your own -->
+    <div class="flex flex-col flex-1 min-h-0 overflow-hidden px-1 pt-1">
+      <div class="pt-1 pb-2">
+        <div class="mb-3 flex items-center justify-between px-1">
+          <div>
+            <span class="text-[9px] font-semibold tracking-[1.75px] text-emerald-400/70">PUBLIC FEED</span>
+          </div>
+          <div class="text-[10px] text-zinc-500">
+            Writings from the community
+          </div>
+        </div>
+
+        <div class="feed-list">
+          {#if publicFeedLoading}
+            <div class="writing-empty py-8">Loading public feed…</div>
+          {:else if publicFeed.length === 0}
+            <div class="writing-empty py-8">
+              <div class="mb-1 text-zinc-300">The feed is quiet right now.</div>
+              <div class="text-[11px] text-zinc-500">Be the first to publish something for others to see.</div>
+            </div>
+          {:else}
+            {#each publicFeed as essay (essay.id)}
+              <a href={`/post/${essay.slug}`} class="feed-entry block no-underline rounded-xl">
+                <!-- Author header -->
+                <div class="flex items-center gap-2.5 mb-2.5">
+                  {#key essay.author_avatar_seed}
+                    <div class="shrink-0 w-6 h-6 bg-[#1f1f1f] rounded-[4px] ring-1 ring-zinc-800 ring-offset-1 ring-offset-[#0a0a0a] overflow-hidden">
+                      <GeneratedAvatar 
+                        userId={essay.user_id} 
+                        seed={essay.author_avatar_seed} 
+                        size={24} 
+                        rounded={0}
+                      />
+                    </div>
+                  {/key}
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="font-medium text-[13px] text-zinc-200 truncate">
+                      {essay.author_username || 'anonymous'}
+                    </span>
+                    <span class="text-zinc-600">·</span>
+                    <span class="text-[11px] text-zinc-500 tabular-nums whitespace-nowrap">
+                      {new Date(essay.published_at || essay.updated_at).toLocaleDateString(undefined, { 
+                        month: 'short', 
+                        day: 'numeric' 
+                      })}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Title -->
+                <div class="feed-title text-[18px] leading-[1.25] font-semibold tracking-[-0.015em] text-white mb-1.5 line-clamp-3">
+                  {essay.title || 'Untitled'}
+                </div>
+
+                <!-- Excerpt -->
+                <div class="feed-excerpt text-[13.5px] leading-[1.4] text-zinc-400 line-clamp-2 mb-3">
+                  {getExcerpt(essay.content, 155)}
+                </div>
+
+                <!-- Meta footer -->
+                <div class="flex items-center">
+                  <span class="text-[11px] text-zinc-500 font-medium tracking-wide">
+                    {estimateReadTimeMinutes(essay.content)} min read
+                  </span>
+                </div>
+              </a>
+            {/each}
+          {/if}
+        </div>
+      </div>
     </div>
   {/if}
   </div>
+  {/if}
 
   {#if bootOverlayVisible && currentUser}
     <div
@@ -1232,6 +2240,7 @@
       {@render bootScreen()}
     </div>
   {/if}
+  </div>
   </div>
   </div>
 

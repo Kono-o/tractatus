@@ -247,3 +247,113 @@ grant execute on function public.get_own_data_usage() to authenticated;
 -- ============================================
 comment on table public.usernames is 'Username + password + identicon auth system.';
 
+-- ============================================
+-- 7. Essays / Writings (Tractatus blog posts, Substack-like)
+-- ============================================
+
+create table if not exists public.essays (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  slug text not null,
+  title text not null,
+  content text not null default '',
+  is_public boolean not null default false,
+  published_at timestamptz,
+  author_username text,
+  author_avatar_seed text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint essays_slug_format check (slug ~ '^[a-z0-9-]{1,120}$'),
+  constraint essays_unique_slug unique (slug)
+);
+
+create index if not exists essays_user_id_idx on public.essays (user_id);
+create index if not exists essays_is_public_idx on public.essays (is_public) where is_public = true;
+
+-- Auto updated_at
+create or replace function public.set_essays_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists essays_set_updated_at on public.essays;
+create trigger essays_set_updated_at
+  before update on public.essays
+  for each row execute function public.set_essays_updated_at();
+
+alter table public.essays enable row level security;
+
+-- Read: public published essays (anon + auth) or own essays
+drop policy if exists "essays_select_public_or_own" on public.essays;
+create policy "essays_select_public_or_own" on public.essays
+  for select
+  to anon, authenticated
+  using (is_public = true or user_id = auth.uid());
+
+-- Insert only own
+drop policy if exists "essays_insert_own" on public.essays;
+create policy "essays_insert_own" on public.essays
+  for insert to authenticated
+  with check (user_id = auth.uid());
+
+-- Update only own
+drop policy if exists "essays_update_own" on public.essays;
+create policy "essays_update_own" on public.essays
+  for update to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+-- Delete only own
+drop policy if exists "essays_delete_own" on public.essays;
+create policy "essays_delete_own" on public.essays
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+-- Update data usage to count essays too (for account panel)
+create or replace function public.get_own_data_usage()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  profile_count int := 0;
+  essay_count int := 0;
+begin
+  if uid is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  select count(*)::int into profile_count
+  from public.usernames
+  where user_id = uid;
+
+  select count(*)::int into essay_count
+  from public.essays
+  where user_id = uid;
+
+  return jsonb_build_object(
+    'templates', profile_count,
+    'exercises', 0,
+    'schedule', 0,
+    'workout_history', 0,
+    'tracked_stats', 0,
+    'stat_logs', 0,
+    'essays', essay_count,
+    'estimated_bytes', (profile_count * 250) + (essay_count * 1800),
+    'exact', true
+  );
+end;
+$$;
+
+revoke all on function public.get_own_data_usage() from public;
+grant execute on function public.get_own_data_usage() to authenticated;
+
+comment on table public.essays is 'User essays/writings. Private drafts (is_public=false) or published (true). Slug is globally unique for nice URLs.';
+

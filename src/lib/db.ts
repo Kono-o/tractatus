@@ -406,6 +406,38 @@ function clearAuthRedirectParams(): void {
 // DB LAYER - AUTH FOCUSED (username + password + identicon)
 // ============================================================
 
+export interface Essay {
+	id: string;
+	user_id: string;
+	slug: string;
+	title: string;
+	content: string;
+	is_public: boolean;
+	published_at: string | null;
+	author_username?: string;
+	author_avatar_seed?: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export function slugifyTitle(title: string): string {
+	const base = (title || 'untitled')
+		.toLowerCase()
+		.normalize('NFKD')
+		.replace(/[\u0300-\u036f]/g, '')
+		.replace(/[^a-z0-9\s-]/g, ' ')
+		.trim()
+		.replace(/\s+/g, '-')
+		.replace(/-+/g, '-')
+		.slice(0, 110);
+	return base || 'untitled';
+}
+
+export function estimateReadTimeMinutes(content: string): number {
+	const words = (content || '').trim().split(/\s+/).filter(Boolean).length;
+	return Math.max(1, Math.round(words / 200));
+}
+
 export const db = {
 	/* ==================================================
 		 AUTH
@@ -631,6 +663,151 @@ export const db = {
 			data: { user },
 		} = await supabase.auth.getUser();
 		return user;
+	},
+
+	/* ==================================================
+		 ESSAYS / WRITINGS
+		 ================================================== */
+
+	async listEssays(): Promise<Essay[]> {
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!user) return [];
+		const { data, error } = await supabase
+			.from('essays')
+			.select('*')
+			.eq('user_id', user.id)
+			.order('updated_at', { ascending: false });
+		if (error) throw error;
+		return (data ?? []) as Essay[];
+	},
+
+	async getEssayById(id: string): Promise<Essay | null> {
+		const { data, error } = await supabase
+			.from('essays')
+			.select('*')
+			.eq('id', id)
+			.single();
+		if (error) {
+			if ((error as any).code === 'PGRST116') return null;
+			throw error;
+		}
+		return data as Essay;
+	},
+
+	async getPublicEssayBySlug(slug: string): Promise<Essay | null> {
+		const { data, error } = await supabase
+			.from('essays')
+			.select('*')
+			.eq('slug', slug)
+			.eq('is_public', true)
+			.single();
+		if (error) {
+			if ((error as any).code === 'PGRST116') return null;
+			throw error;
+		}
+		return data as Essay;
+	},
+
+	async getEssayForEdit(id: string): Promise<Essay | null> {
+		return this.getEssayById(id);
+	},
+
+	async saveEssay(params: {
+		id?: string | null;
+		title: string;
+		content: string;
+		slug: string;
+		is_public: boolean;
+	}): Promise<Essay> {
+		const { data: { user } } = await supabase.auth.getUser();
+		const uid = user?.id;
+		if (!uid) throw new Error('Not authenticated');
+
+		const now = new Date().toISOString();
+		const payload: any = {
+			title: (params.title || 'Untitled').trim().slice(0, 200),
+			content: params.content ?? '',
+			slug: params.slug,
+			is_public: !!params.is_public,
+			is_published: !!params.is_public,
+			updated_at: now,
+		};
+
+		if (params.is_public) {
+			payload.published_at = payload.published_at || now;
+		}
+
+		// Denormalize author info for public feed display (like Substack)
+		try {
+			const { data: author } = await supabase
+				.from('usernames')
+				.select('username, avatar_seed')
+				.eq('user_id', uid)
+				.single();
+			if (author) {
+				payload.author_username = author.username;
+				payload.author_avatar_seed = author.avatar_seed;
+			}
+		} catch (e) {
+			// non-fatal; fall back to username from auth metadata if possible
+			const fallback = (user?.user_metadata?.username as string) || undefined;
+			if (fallback) payload.author_username = fallback;
+		}
+
+		if (params.id) {
+			const { data, error } = await supabase
+				.from('essays')
+				.update(payload)
+				.eq('id', params.id)
+				.select('*')
+				.single();
+			if (error) throw error;
+			return data as Essay;
+		} else {
+			payload.user_id = uid;
+			payload.created_at = now;
+			const { data, error } = await supabase
+				.from('essays')
+				.insert(payload)
+				.select('*')
+				.single();
+			if (error) throw error;
+			return data as Essay;
+		}
+	},
+
+	async deleteEssay(id: string): Promise<void> {
+		const { error } = await supabase.from('essays').delete().eq('id', id);
+		if (error) throw error;
+	},
+
+	async isSlugAvailable(slug: string, excludeId?: string | null): Promise<boolean> {
+		let q = supabase.from('essays').select('id', { count: 'exact', head: true }).eq('slug', slug);
+		if (excludeId) q = q.neq('id', excludeId);
+		const { count, error } = await q;
+		if (error) throw error;
+		return (count ?? 0) === 0;
+	},
+
+	/** Public feed: all published essays from other users, newest first */
+	async listPublicFeed(): Promise<Essay[]> {
+		const { data: { user } } = await supabase.auth.getUser();
+		const uid = user?.id;
+
+		let query = supabase
+			.from('essays')
+			.select('*')
+			.eq('is_public', true)
+			.order('published_at', { ascending: false, nullsFirst: false })
+			.order('updated_at', { ascending: false });
+
+		if (uid) {
+			query = query.neq('user_id', uid);
+		}
+
+		const { data, error } = await query;
+		if (error) throw error;
+		return (data ?? []) as Essay[];
 	},
 };
 
