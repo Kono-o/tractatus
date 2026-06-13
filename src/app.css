@@ -42,8 +42,8 @@
   --rule2: var(--border);
   --surf: #f1ede3;
 
-  /* Feed-specific divider (25% darker than --border) */
-  --feed-rule: #ada79e;
+  /* Feed-specific divider (darker than --border; adjusted) */
+  --feed-rule: #cac3b8;
 
   --app-pad-x: clamp(1rem, 4vw, 2.75rem);
   --app-pad-top: clamp(1rem, 2.5vw, 2rem);
@@ -2715,18 +2715,13 @@ span.boot-panel-placeholder::after,
 .pub-featured {
   padding: 1rem 1rem 0.875rem;
   border-bottom: 0.5px solid var(--feed-rule);
+  border-top: none; /* ensure no divider above the latest post */
   position: relative;
 }
 
+/* Remove the decorative top accent so the latest post has no divider on top */
 .pub-featured::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 1.5px;
-  background: var(--accent);
-  opacity: 0.25;
+  display: none;
 }
 
 .pub-featured .pub-tag {
