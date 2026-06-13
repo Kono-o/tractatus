@@ -25,7 +25,7 @@
   /* Classy Medium / newspaper light theme */
   --bg: #f8f4eb;
   --card: #ffffff;
-  --border: #e6dfd3;
+  --border: #ada79e; /* ~25% darker than previous #e6dfd3 */
   --text: #1f1a14;
   --text-muted: #5c5346;
   --accent: #2f3a2f;
@@ -38,8 +38,8 @@
   --ink-hover: #4a4036;
   --muted: var(--text-muted);
   --hint: #8a7f72;
-  --rule: var(--border);
-  --rule2: var(--border);
+  --rule: #ada79e;
+  --rule2: #ada79e;
   --surf: #f1ede3;
 
   --app-pad-x: clamp(1rem, 4vw, 2.75rem);

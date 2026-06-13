@@ -382,6 +382,10 @@
   let feedTouchStartY = $state(0);
   let feedTouchId = $state<number | null>(null);
   let searchQuery = $state('');
+  // Deduping guard: timestamp of last feed refresh (ms)
+  let lastFeedRefreshAt = $state<number | null>(null);
+  const FEED_REFRESH_DEDUP_MS = 800; // ignore refreshes within 800ms of previous one
+
   let searchResults = $state<Essay[]>([]);
   let searchLoading = $state(false);
   let searchExpanded = $state(false);
@@ -1385,6 +1389,14 @@
   }
 
   async function loadPublicFeed() {
+    // Deduplicate rapid/overlapping refreshes. If a refresh is in progress or
+    // one completed very recently, skip to avoid duplicate work (e.g., pull-to-refresh
+    // + auto-refresh firing together).
+    const now = Date.now();
+    if (publicFeedLoading) return;
+    if (lastFeedRefreshAt && now - lastFeedRefreshAt < FEED_REFRESH_DEDUP_MS) return;
+
+    lastFeedRefreshAt = now;
     publicFeedLoading = true;
     try {
       publicFeed = await db.listPublicFeed();
