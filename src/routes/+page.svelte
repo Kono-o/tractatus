@@ -32,11 +32,9 @@
   import confetti from 'canvas-confetti';
   import {
     loadSupabasePanelSnapshot,
-    formatSupabaseLatencyMs,
     formatSessionExpiry,
     type SupabasePanelSnapshot,
   } from '$lib/supabaseStatus';
-  import HeaderClock from '$lib/components/HeaderClock.svelte';
   import {
     Check,
     CircleAlert,
@@ -69,16 +67,166 @@
     ArrowLeft,
     X,
     BookOpen,
+    Search,
+    Plus,
+    User,
   } from '@lucide/svelte';
 
-  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const FEED_SEARCH_DEBOUNCE_MS = 280;
+  const FEED_EXCERPT_FEATURED = 220;
+  const FEED_EXCERPT_ITEM = 100;
 
-  function getISOWeekNumber(d: Date): number {
-    const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    const dayNum = date.getUTCDay() || 7;
-    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-    return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  function formatFeedDate(iso: string): string {
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  function selectFeedTab() {
+    viewMode = 'feed';
+    closeArticle();
+    if (isWriting) void exitWriting();
+  }
+
+  function selectLibraryTab() {
+    if (!currentUser) {
+      openAuthPanel();
+      return;
+    }
+    viewMode = 'library';
+    closeArticle();
+    if (isWriting) void exitWriting();
+  }
+
+  let readingEssay = $state<Essay | null>(null);
+  let readingEssayLoading = $state(false);
+  let readingEssayError = $state<string | null>(null);
+
+  function preprocessMarkdown(md: string): string {
+    if (!md) return '';
+    let out = md;
+    out = out.replace(/==(.+?)==/g, '<mark>$1</mark>');
+    out = out.replace(/\^(.+?)\^/g, '<sup>$1</sup>');
+    out = out.replace(/~(.+?)~/g, '<sub>$1</sub>');
+    out = out.replace(/::: (center|left|right)\s*([\s\S]*?):::/g, (_m, align, inner) => {
+      return `<div style="text-align:${align}">${inner.trim()}</div>`;
+    });
+    return out;
+  }
+
+  function renderEssay(md: string): string {
+    if (!md) return '';
+    if (typeof window === 'undefined' || typeof DOMPurify === 'undefined') {
+      return md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    }
+    const pre = preprocessMarkdown(md);
+    const raw = marked.parse(pre, { breaks: true, gfm: true }) as string;
+    return DOMPurify.sanitize(raw, {
+      ALLOWED_TAGS: [
+        'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'del',
+        'ul', 'ol', 'li', 'a', 'code', 'pre',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'blockquote', 'hr', 'mark', 'sup', 'sub', 'div', 'span',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      ],
+      ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class'],
+    });
+  }
+
+  function closeArticle() {
+    readingEssay = null;
+    readingEssayError = null;
+    readingEssayLoading = false;
+  }
+
+  async function openArticle(essay: Essay) {
+    viewMode = 'feed';
+    if (searchExpanded) await toggleSearch();
+    readingEssayLoading = true;
+    readingEssayError = null;
+    readingEssay = null;
+    try {
+      if (essay.content?.trim()) {
+        readingEssay = essay;
+      } else {
+        const full = await db.getPublicEssayBySlug(essay.slug);
+        if (!full) readingEssayError = 'This essay is not public or does not exist.';
+        else readingEssay = full;
+      }
+    } catch (e) {
+      console.warn('[article] load failed', e);
+      readingEssayError = 'Failed to load essay.';
+    } finally {
+      readingEssayLoading = false;
+    }
+  }
+
+  function handleHeaderBack() {
+    if (isWriting) void exitWriting();
+    else closeArticle();
+  }
+
+  let feedSearchQuery = $state('');
+  let searchResults = $state<Essay[]>([]);
+  let searchLoading = $state(false);
+  let searchExpanded = $state(false);
+  let searchInputEl = $state<HTMLInputElement | null>(null);
+  let feedSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let isFeedSearching = $derived(feedSearchQuery.trim().length > 0);
+
+  async function runFeedSearch(query: string) {
+    const term = query.trim();
+    if (!term) {
+      searchResults = [];
+      searchLoading = false;
+      return;
+    }
+    searchLoading = true;
+    try {
+      searchResults = await db.searchPublicEssays(term);
+    } catch (e) {
+      console.warn('[feed] search failed', e);
+      searchResults = [];
+    } finally {
+      searchLoading = false;
+    }
+  }
+
+  function onFeedSearchInput(value: string) {
+    feedSearchQuery = value;
+    if (value.trim()) viewMode = 'feed';
+    if (feedSearchDebounceTimer) clearTimeout(feedSearchDebounceTimer);
+    if (!value.trim()) {
+      searchResults = [];
+      searchLoading = false;
+      return;
+    }
+    searchLoading = true;
+    feedSearchDebounceTimer = setTimeout(() => {
+      void runFeedSearch(value);
+    }, FEED_SEARCH_DEBOUNCE_MS);
+  }
+
+  async function toggleSearch() {
+    searchExpanded = !searchExpanded;
+    if (searchExpanded) {
+      await tick();
+      searchInputEl?.focus();
+      return;
+    }
+    feedSearchQuery = '';
+    searchResults = [];
+    searchLoading = false;
+    if (feedSearchDebounceTimer) {
+      clearTimeout(feedSearchDebounceTimer);
+      feedSearchDebounceTimer = null;
+    }
+  }
+
+  function onSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (searchExpanded) void toggleSearch();
+    }
   }
 
   function focusExerciseNameInput(node: HTMLInputElement) {
@@ -114,6 +262,7 @@
 
   // Account / settings panel (ported from Lift Tracker)
   let showSettingsPanel = $state(false);
+  let showAuthPanel = $state(false);
   let supabasePanel = $state<SupabasePanelSnapshot | null>(null);
   let supabasePanelLoading = $state(false);
   let avatarSeed = $state<string | null>(null);
@@ -203,8 +352,11 @@
   });
 
   let writingCount = $derived(essays.length);
-  let drafts = $derived(essays.filter(e => !e.is_public));
-  let published = $derived(essays.filter(e => e.is_public));
+  let libraryEssays = $derived(
+    [...essays].sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    ),
+  );
 
   let editorWordCount = $derived((editorContent || '').trim().split(/\s+/).filter(Boolean).length);
   let editorReadMins = $derived(estimateReadTimeMinutes(editorContent));
@@ -219,6 +371,7 @@
   let viewMode = $state<'feed' | 'library'>('feed');
   let publicFeed = $state<Essay[]>([]);
   let publicFeedLoading = $state(false);
+  let publicFeedLoadedOnce = $state(false);
 
   /** Substack-style excerpt: strip basic markdown and truncate */
   function getExcerpt(content: string, maxLength = 140): string {
@@ -622,6 +775,23 @@
 
   function handleAuthSuccess() {
     didRunStartupUpdateCheck = false;
+    showAuthPanel = false;
+  }
+
+  function openAuthPanel() {
+    showAuthPanel = true;
+  }
+
+  function closeAuthPanel() {
+    showAuthPanel = false;
+  }
+
+  function handleWriteFabClick() {
+    if (!currentUser) {
+      openAuthPanel();
+      return;
+    }
+    void enterNewWrite();
   }
 
   let accountDisplayName = $derived(getAuthDisplayName(currentUser));
@@ -634,14 +804,6 @@
       month: 'short',
       day: 'numeric',
     });
-  });
-
-  let headerBarLabel = $derived.by(() => {
-    const now = new Date();
-    const umons = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-    const nice = `${now.getDate()} ${umons[now.getMonth()]} ${now.getFullYear()}`;
-    const week = getISOWeekNumber(now);
-    return `${nice} · ${DAY_NAMES[now.getDay()].toUpperCase()} · W${week}`;
   });
 
   let changePasswordFeedbackVisible = $derived(!!(changePasswordError || changePasswordSuccess));
@@ -1112,13 +1274,10 @@
   }
 
   async function loadPublicFeed() {
-    if (!currentUser) {
-      publicFeed = [];
-      return;
-    }
     publicFeedLoading = true;
     try {
       publicFeed = await db.listPublicFeed();
+      publicFeedLoadedOnce = true;
     } catch (e) {
       console.warn('[feed] load failed', e);
     } finally {
@@ -1306,9 +1465,8 @@
       // Refresh from DB to guarantee the essay is persisted and visible in Library
       void loadEssays().catch(() => {});
 
-      // If we just published, reflect in local state
       if (forcePublic) {
-        // essays already updated
+        void loadPublicFeed().catch(() => {});
       }
     } catch (e: any) {
       console.error('save essay failed', e);
@@ -1345,6 +1503,8 @@
   }
 
   async function enterNewWrite() {
+    if (searchExpanded) await toggleSearch();
+    closeArticle();
     resetEditor();
     isWriting = true;
     editorTitle = '';
@@ -1380,7 +1540,7 @@
   }
 
   // Textarea ref for caret ops
-  let textareaEl: HTMLTextAreaElement | null = null;
+  let textareaEl = $state<HTMLTextAreaElement | null>(null);
 
   function getTextarea(): HTMLTextAreaElement | null {
     return textareaEl;
@@ -1611,16 +1771,18 @@
     node.select();
   }
 
-  // Load essays after initial app data + when signed in
+  // Load feed for everyone; essays only when signed in
   $effect(() => {
+    if (!isAuthLoading && !publicFeedLoadedOnce) {
+      void loadPublicFeed();
+    }
     if (currentUser && hasInitialLoad && !essaysLoadedOnce) {
       void loadEssays();
-      void loadPublicFeed();
     }
     if (!currentUser) {
       essays = [];
-      publicFeed = [];
       essaysLoadedOnce = false;
+      viewMode = 'feed';
       if (isWriting) {
         resetEditor();
         isWriting = false;
@@ -1631,6 +1793,158 @@
   // Keep writings count fresh in chip (already reactive via writingCount)
 </script>
 
+{#snippet panelHeaderRow()}
+  <div class="settings-panel-header__brand-row">
+    <span class="settings-panel-brand__lift">Tractatus</span>
+  </div>
+{/snippet}
+
+{#snippet compactHeader(writingMode = false, articleMode = false)}
+  <div class="pub-header-wrap">
+    <header
+      class="pub-header"
+      class:pub-header--search-open={searchExpanded && !writingMode && !articleMode}
+      class:pub-header--article={articleMode}
+    >
+      <div class="pub-header-start">
+        {#if writingMode}
+          <button
+            type="button"
+            class="pub-header-icon-btn"
+            onclick={handleHeaderBack}
+            disabled={isSaving}
+            aria-label="Back to feed"
+          >
+            <ArrowLeft class="size-3.5" aria-hidden="true" />
+          </button>
+        {/if}
+        <div
+          class="pub-header-logo"
+          class:pub-header-logo--hidden={searchExpanded && !writingMode && !articleMode}
+          aria-hidden={searchExpanded && !writingMode && !articleMode}
+        >
+          Tractatus
+        </div>
+      </div>
+
+      {#if !writingMode && !articleMode}
+        <div class="pub-header-search-slot" class:pub-header-search-slot--open={searchExpanded}>
+          <input
+            bind:this={searchInputEl}
+            type="search"
+            class="pub-header-search-input"
+            placeholder="Search essays"
+            value={feedSearchQuery}
+            oninput={(e) => onFeedSearchInput(e.currentTarget.value)}
+            onkeydown={onSearchKeydown}
+            aria-label="Search all public essays"
+            tabindex={searchExpanded ? 0 : -1}
+          />
+        </div>
+      {/if}
+
+      <div class="pub-header-actions">
+        {#if !writingMode && !articleMode}
+          <button
+            type="button"
+            class="pub-header-icon-btn pub-header-icon-btn--plain"
+            onclick={() => void toggleSearch()}
+            aria-label={searchExpanded ? 'Close search' : 'Search essays'}
+            aria-expanded={searchExpanded}
+          >
+            {#if searchExpanded}
+              <X class="size-5" aria-hidden="true" />
+            {:else}
+              <Search class="size-5" aria-hidden="true" />
+            {/if}
+          </button>
+        {/if}
+        {#if articleMode || !writingMode}
+          {#if currentUser}
+            <button
+              type="button"
+              class="pub-header-icon-btn pub-header-avatar"
+              onclick={openSettingsPanel}
+              aria-label="Account and settings"
+            >
+              {#key avatarSeed}
+                <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} size={28} rounded={0} />
+              {/key}
+            </button>
+          {:else}
+            <button
+              type="button"
+              class="pub-header-icon-btn pub-header-guest-btn"
+              onclick={openAuthPanel}
+              aria-label="Sign in or sign up"
+            >
+              <User class="size-3.5" aria-hidden="true" />
+            </button>
+          {/if}
+        {/if}
+      </div>
+    </header>
+
+    {#if articleMode}
+      <div class="pub-header-sub">
+        <button
+          type="button"
+          class="pub-header-back-btn"
+          onclick={handleHeaderBack}
+          aria-label="Back to feed"
+        >
+          <ArrowLeft class="size-3.5" aria-hidden="true" />
+          Back
+        </button>
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet feedCard(essay: Essay, featured = false)}
+  <button
+    type="button"
+    class="pub-feed-card"
+    class:pub-feed-card--featured={featured}
+    onclick={() => void openArticle(essay)}
+  >
+    <span
+      class="pub-feed-card-title"
+      class:pub-feed-card-title--featured={featured}
+    >
+      {essay.title || 'Untitled'}
+    </span>
+    {#if getExcerpt(essay.content, featured ? FEED_EXCERPT_FEATURED : FEED_EXCERPT_ITEM)}
+      <span
+        class="pub-feed-card-excerpt"
+        class:pub-feed-card-excerpt--featured={featured}
+      >
+        {getExcerpt(essay.content, featured ? FEED_EXCERPT_FEATURED : FEED_EXCERPT_ITEM)}
+      </span>
+    {/if}
+  </button>
+{/snippet}
+
+{#snippet feedAuthorRow(essay: Essay)}
+  <div class="pub-author">
+    {#key essay.author_avatar_seed}
+      <div class="pub-author-avatar">
+        <GeneratedAvatar
+          userId={essay.user_id}
+          seed={essay.author_avatar_seed}
+          size={22}
+          rounded={0}
+        />
+      </div>
+    {/key}
+    <span class="pub-author-meta">
+      {essay.author_username || 'Anonymous'} &nbsp;·&nbsp;
+      {estimateReadTimeMinutes(essay.content)} min &nbsp;·&nbsp;
+      {formatFeedDate(essay.published_at || essay.updated_at)}
+    </span>
+  </div>
+{/snippet}
+
 {#snippet writingsChip(ghost = false, reveal = false)}
   <div
     class="mt-1 mb-2"
@@ -1640,11 +1954,11 @@
   >
     <div class="flex justify-center text-[9px] text-zinc-400">
       <span
-        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-[#1e1e1e] rounded border border-[#2a2a2a] justify-center"
+        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-[color:var(--surf)] rounded border border-[color:var(--border)] justify-center text-[color:var(--hint)]"
         class:boot-panel-placeholder={ghost}
       >
         <Pencil class="size-3 shrink-0 {ghost ? 'boot-panel-placeholder__ghost' : ''}" aria-hidden="true" />
-        <span class="leading-none {ghost ? 'boot-panel-placeholder__ghost' : ''}">{writingCount} writing{writingCount === 1 ? '' : 's'}</span>
+        <span class="leading-none {ghost ? 'boot-panel-placeholder__ghost' : ''}">{writingCount} essay{writingCount === 1 ? '' : 's'}</span>
       </span>
     </div>
   </div>
@@ -1653,7 +1967,7 @@
 {#snippet bootScreen()}
   {@const panel = supabasePanel}
   <div
-    class="settings-panel-dialog boot-panel-dialog rounded-xl border border-[#1e1e1e] bg-[#141414] shadow-xl overflow-hidden text-left"
+    class="settings-panel-dialog boot-panel-dialog rounded-xl shadow-xl overflow-hidden text-left"
     class:boot-panel-reveal--active={bootAccountReveal}
     role="status"
     aria-live="polite"
@@ -1661,45 +1975,16 @@
     aria-label={bootAccountReveal ? 'Account ready' : bootMessage}
   >
     <div class="settings-panel-header">
-      <div class="settings-panel-header__title">
-        <div class="settings-panel-brand" aria-hidden="true">
-          <span class="settings-panel-brand__lift">TRACTATUS</span>
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <div class="settings-panel-header__supabase" aria-hidden="true">
-          <span class="settings-panel-header__supabase-label">Supabase</span>
-          <span class="settings-panel-header__dot-wrap">
-            <span
-              class="db-io-dot settings-panel-header__dot"
-              class:db-io-dot--active={bootAccountReveal && !!panel && panel.health.ok && panel.sessionOk}
-              class:boot-panel-dot-pulse={!bootAccountReveal}
-            ></span>
-          </span>
-          <span
-            class="settings-panel-header__latency"
-            class:boot-panel-reveal-item={bootAccountReveal}
-            class:boot-panel-reveal-item--header={bootAccountReveal}
-          >
-            {#if bootAccountReveal && panel?.health.latencyMs != null}
-              {formatSupabaseLatencyMs(panel.health.latencyMs)}
-            {:else if bootAccountReveal}
-              —
-            {:else}
-              …
-            {/if}
-          </span>
-        </div>
-        <button
-          type="button"
-          class="settings-panel-header__close"
-          disabled
-          aria-hidden="true"
-          tabindex="-1"
-        >
-          <X class="size-3.5" />
-        </button>
-      </div>
+      {@render panelHeaderRow()}
+      <button
+        type="button"
+        class="settings-panel-header__close"
+        disabled
+        aria-hidden="true"
+        tabindex="-1"
+      >
+        <X class="size-3.5" />
+      </button>
     </div>
 
     <div class="settings-panel-body text-[10px] leading-snug">
@@ -1810,182 +2095,25 @@
   </div>
 {/snippet}
 
-<div class="app w-full h-dvh max-h-dvh overflow-hidden select-none text-white bg-black flex flex-col font-sans">
+<div class="app w-full h-dvh max-h-dvh overflow-hidden select-none flex flex-col font-sans" class:app--pub={!isAuthLoading}>
   <div class="app-stage flex-1 flex flex-col min-h-0 w-full relative overflow-hidden">
   <div class="app-stage-scroll flex-1 min-h-0 flex flex-col overflow-hidden">
   <div
     class="app-stage-reveal app-stack-gap flex flex-col flex-1 min-h-0 w-full overflow-hidden"
-    class:app-stage-reveal--active={stageRevealActive || (!isAuthLoading && !currentUser)}
+    class:app-stage-reveal--active={stageRevealActive || !isAuthLoading}
   >
   {#if isAuthLoading}
-    <!-- Don't show sign in / sign up screen until we have resolved the initial auth state.
-         This prevents the auth form from flashing on app launch / refresh when the user is already logged in. -->
-    <div class="flex-1 min-h-0 flex items-center justify-center">
+    <div class="app-loading flex-1 min-h-0 flex items-center justify-center">
       <div class="boot-panel-avatar-spinner" style="width: 2.25rem; height: 2.25rem; border-width: 3px;"></div>
     </div>
-  {:else if !currentUser}
-    <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
-      <AuthScreen onAuthenticated={handleAuthSuccess} />
-    </div>
   {:else}
-  <div class="app-stage-sticky app-stack-gap shrink-0 flex flex-col">
-  <div class="week-calendar-swipe rounded-xl border border-[#1e1e1e] bg-[#141414] overflow-hidden">
-    <div class="flex items-center gap-2 min-h-8 px-2 py-1.5 border-b border-[#1e1e1e] bg-[#111] text-[10px] tracking-[1px]">
-      <button
-        type="button"
-        title="Account and backend"
-        aria-label="Account and backend"
-        class="w-7 h-7 shrink-0 rounded bg-emerald-950/40 flex items-center justify-center hover:bg-emerald-900/40 transition"
-        onclick={(e) => { e.stopPropagation(); openSettingsPanel(); }}
-      >
-        {#key avatarSeed}
-          <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} size={26} rounded={2} className="rounded" />
-        {/key}
-      </button>
-      <div class="flex-1 flex items-center gap-2 min-w-0">
-        <div class="flex-1 flex items-center gap-2 min-w-0 py-0.5 -my-0.5 px-1 min-w-0">
-          <span class="min-w-0 flex-1 truncate text-left leading-none font-bold text-zinc-200 pointer-events-none">{headerBarLabel}</span>
-        </div>
-        <span class="header-clock-group shrink-0">
-          <HeaderClock />
-          <button
-            type="button"
-            class="db-io-dot-btn"
-            aria-label="Account and backend"
-            title="Account and backend"
-            onclick={openSettingsPanel}
-          >
-            <span
-              class="db-io-dot"
-              class:db-io-dot--active={dbIoFlash}
-              aria-hidden="true"
-            ></span>
-          </button>
-        </span>
-      </div>
-    </div>
-    <div
-      class="week-calendar-panel grid"
-      style="grid-template-rows: 0fr"
-      aria-hidden="true"
-    >
-      <div class="overflow-hidden min-h-0 pointer-events-none"></div>
-    </div>
-  </div>
+  <div class="pub-shell flex flex-col flex-1 min-h-0 w-full overflow-hidden">
+    {@render compactHeader(isWriting, !!readingEssay)}
 
-  <!-- ACTION BAR: button trio (or single WRITE) directly below the header box, matching Lift Tracker workout CTA placement -->
-  {#if currentUser}
-    <div class="px-1 pt-1 pb-1.5">
-      {#if isWriting}
-        {#if saveError}
-          <p class="text-[10px] text-red-400 px-3 pb-1">{saveError}</p>
-        {/if}
-        <!-- SAVE | PUBLISH | DELETE trio -->
-        <div class="app-cta-grid">
-          <button
-            type="button"
-            class="workout-cta-side col-span-1 border bg-[#0d0d0d] border-[#1e1e1e] text-white hover:border-white/40 rounded-xl"
-            style="height: var(--cta-height);"
-            disabled={isSaving || !currentEssayId && !(editorTitle.trim() || editorContent.trim())}
-            onclick={() => void handleSaveDraft()}
-          >
-            <span class="workout-cta-side-content">
-              <Save class="workout-cta-side-icon" strokeWidth={2.25} />
-              <span class="workout-cta-label workout-cta-label-side" style="--cta-ch-side-max:6">SAVE</span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="{workoutCenterBtnClass} border-transparent bg-white text-black"
-            disabled={isSaving || (!editorTitle.trim() && !editorContent.trim())}
-            onclick={() => void handlePublish()}
-          >
-            <span
-              class={workoutCenterLabelClass}
-              style={ctaChStyle(mainActionLabel, CENTER_CTA_MAX_CH)}
-            >
-              {mainActionLabel}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="workout-cta-side col-span-1 group border bg-[#0d0d0d] border-[#1e1e1e] text-[#fda4af] hover:border-red-400/60 rounded-xl relative overflow-hidden {deleteTapPulseActive ? 'hold-cancel-tap-pulse' : ''}"
-            style="height: var(--cta-height);"
-            disabled={isSaving || !currentEssayId}
-            onmousedown={startDeleteHold}
-            onmouseup={stopDeleteHold}
-            onmouseleave={stopDeleteHold}
-            ontouchstart={startDeleteHold}
-            ontouchend={stopDeleteHold}
-            onanimationend={onDeleteTapPulseEnd}
-          >
-            <div class="absolute inset-0 z-0 bg-red-900/50 transition-all duration-[20ms]" style="width: {deleteHoldProgress}%;"></div>
-            <span class="workout-cta-side-content relative z-10">
-              <Trash2 class="workout-cta-side-icon" strokeWidth={2.25} />
-              <span class="workout-cta-label workout-cta-label-side" style="--cta-ch-side-max:6">DELETE</span>
-            </span>
-          </button>
-        </div>
-      {:else}
-        <!-- Library (left) | WRITE (center) | empty (right) -->
-        <div class="app-cta-grid">
-          <button
-            type="button"
-            class="workout-cta-side col-span-1 border bg-[#0d0d0d] border-[#1e1e1e] text-white hover:border-white/40 rounded-xl"
-            style="height: var(--cta-height);"
-            onclick={() => { viewMode = viewMode === 'library' ? 'feed' : 'library'; }}
-          >
-            <span class="workout-cta-side-content">
-              <BookOpen class="workout-cta-side-icon" strokeWidth={2.25} />
-              <span class="workout-cta-label workout-cta-label-side" style="--cta-ch-side-max:7">
-                {viewMode === 'library' ? 'FEED' : 'LIBRARY'}
-              </span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="{workoutCenterBtnClass} border-transparent bg-white text-black"
-            onclick={() => void handleWriteButton()}
-          >
-            <span
-              class={workoutCenterLabelClass}
-              style={ctaChStyle(WRITE_CTA, CENTER_CTA_MAX_CH)}
-            >
-              {WRITE_CTA}
-            </span>
-          </button>
-
-          <div class="workout-cta-empty"></div>
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  <!-- MAIN CONTENT BELOW ACTION BAR (editor body or writings list) -->
-  {#if isWriting}
-    <!-- LIVE EDITOR BODY (below the header + trio) -->
-    <div class="flex flex-col flex-1 min-h-0 overflow-hidden px-1 pt-1">
-      <!-- Small editor sub-header (back + stats) -->
-      <div class="flex items-center gap-2 mb-2 px-1">
-        <button
-          type="button"
-          class="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white active:text-white transition px-2 py-1 -ml-1 rounded"
-          onclick={() => void exitWriting()}
-          disabled={isSaving}
-        >
-          <ArrowLeft class="size-4" />
-          <span class="text-[10px] tracking-widest">BACK</span>
-        </button>
-        <div class="flex-1" />
-        <div class="text-[10px] text-zinc-500 tabular-nums font-mono">
-          {editorWordCount} words · ~{editorReadMins}m
-        </div>
-      </div>
-
-      <div class="editor-wrap flex-1 min-h-0 flex flex-col">
+    <div class="pub-body flex flex-col flex-1 min-h-0 overflow-hidden">
+  {#if currentUser && isWriting}
+    <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
+      <div class="editor-wrap flex-1 min-h-0 flex flex-col mx-3 mb-2 overflow-hidden">
         <!-- Title -->
         <input
           type="text"
@@ -2011,7 +2139,7 @@
           />
           <button
             type="button"
-            class="text-[10px] px-2 py-0.5 border border-[#27272a] rounded hover:bg-[#1a1a1a] active:bg-[#222] disabled:opacity-50"
+            class="editor-regen-btn"
             onclick={() => generateSlugFromTitle(true)}
             disabled={isSaving}
           >REGEN</button>
@@ -2020,54 +2148,54 @@
         <!-- Toolbar -->
         <div class="editor-toolbar">
           <!-- Headings -->
-          <button class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(1)} title="H1" disabled={isSaving}>H1</button>
-          <button class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(2)} title="H2" disabled={isSaving}>H2</button>
-          <button class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(3)} title="H3" disabled={isSaving}>H3</button>
+          <button type="button" class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(1)} title="H1" disabled={isSaving}>H1</button>
+          <button type="button" class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(2)} title="H2" disabled={isSaving}>H2</button>
+          <button type="button" class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(3)} title="H3" disabled={isSaving}>H3</button>
 
-          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
 
-          <button class="editor-tool-btn" onclick={() => wrapSelection('**','**')} title="Bold" disabled={isSaving}><Bold class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={() => wrapSelection('*','*')} title="Italic" disabled={isSaving}><Italic class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={() => wrapSelection('~~','~~')} title="Strike" disabled={isSaving}><Strikethrough class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={applyHighlight} title="Highlight" disabled={isSaving}><Highlighter class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={() => wrapSelection('**','**')} title="Bold" disabled={isSaving}><Bold class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={() => wrapSelection('*','*')} title="Italic" disabled={isSaving}><Italic class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={() => wrapSelection('~~','~~')} title="Strike" disabled={isSaving}><Strikethrough class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={applyHighlight} title="Highlight" disabled={isSaving}><Highlighter class="size-3.5" /></button>
 
-          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
 
-          <button class="editor-tool-btn" onclick={applySup} title="Superscript" disabled={isSaving}><Superscript class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={applySub} title="Subscript" disabled={isSaving}><Subscript class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={applySup} title="Superscript" disabled={isSaving}><Superscript class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={applySub} title="Subscript" disabled={isSaving}><Subscript class="size-3.5" /></button>
 
-          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
 
-          <button class="editor-tool-btn" onclick={insertLink} title="Link" disabled={isSaving}><Link class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={insertImageLink} title="Image link (URL only)" disabled={isSaving}><Image class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={insertLink} title="Link" disabled={isSaving}><Link class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={insertImageLink} title="Image link (URL only)" disabled={isSaving}><Image class="size-3.5" /></button>
 
-          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
 
-          <button class="editor-tool-btn" onclick={insertInlineCode} title="Inline code" disabled={isSaving}><Code class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={insertCodeBlock} title="Code block" disabled={isSaving}><Code2 class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={insertDivider} title="Divider" disabled={isSaving}><Minus class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={insertQuote} title="Quote / poetry" disabled={isSaving}><Quote class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={insertInlineCode} title="Inline code" disabled={isSaving}><Code class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={insertCodeBlock} title="Code block" disabled={isSaving}><Code2 class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={insertDivider} title="Divider" disabled={isSaving}><Minus class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={insertQuote} title="Quote / poetry" disabled={isSaving}><Quote class="size-3.5" /></button>
 
-          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
 
-          <button class="editor-tool-btn" onclick={() => wrapLatex(true)} title="Inline LaTeX $" disabled={isSaving}><Sigma class="size-3.5" /></button>
-          <button class="editor-tool-btn--wide editor-tool-btn" onclick={() => wrapLatex(false)} title="Block LaTeX $$" disabled={isSaving}>$$</button>
+          <button type="button" class="editor-tool-btn" onclick={() => wrapLatex(true)} title="Inline LaTeX $" disabled={isSaving}><Sigma class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn--wide editor-tool-btn" onclick={() => wrapLatex(false)} title="Block LaTeX $$" disabled={isSaving}>$$</button>
 
-          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
 
-          <button class="editor-tool-btn" onclick={() => applyAlign('left')} title="Align left" disabled={isSaving}><AlignLeft class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={() => applyAlign('center')} title="Align center" disabled={isSaving}><AlignCenter class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={() => applyAlign('right')} title="Align right" disabled={isSaving}><AlignRight class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={() => applyAlign('left')} title="Align left" disabled={isSaving}><AlignLeft class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={() => applyAlign('center')} title="Align center" disabled={isSaving}><AlignCenter class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={() => applyAlign('right')} title="Align right" disabled={isSaving}><AlignRight class="size-3.5" /></button>
 
-          <div class="w-px h-5 bg-[#1e1e1e] mx-1"></div>
+          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
 
-          <button class="editor-tool-btn" onclick={insertFootnote} title="Footnote" disabled={isSaving}>[^]</button>
+          <button type="button" class="editor-tool-btn" onclick={insertFootnote} title="Footnote" disabled={isSaving}>[^]</button>
 
-          <div class="flex-1" />
+          <div class="flex-1"></div>
 
           <!-- Undo / Redo -->
-          <button class="editor-tool-btn" onclick={undo} disabled={isSaving || undoStack.length === 0} title="Undo (Ctrl/Cmd+Z)"><Undo2 class="size-3.5" /></button>
-          <button class="editor-tool-btn" onclick={redo} disabled={isSaving || redoStack.length === 0} title="Redo (Ctrl/Cmd+Shift+Z)"><Redo2 class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={undo} disabled={isSaving || undoStack.length === 0} title="Undo (Ctrl/Cmd+Z)"><Undo2 class="size-3.5" /></button>
+          <button type="button" class="editor-tool-btn" onclick={redo} disabled={isSaving || redoStack.length === 0} title="Redo (Ctrl/Cmd+Shift+Z)"><Redo2 class="size-3.5" /></button>
         </div>
 
         <!-- The actual live markdown source editor (like obsidian source mode + substack flow) -->
@@ -2097,137 +2225,145 @@
         </div>
       </div>
     </div>
-  {:else if viewMode === 'library'}
-    <!-- YOUR LIBRARY (own drafts + published) -->
-    <div class="flex flex-col flex-1 min-h-0 overflow-hidden px-1 pt-1">
-      <div class="mb-3 px-1">
-        <span class="text-[9px] font-semibold tracking-[1.75px] text-amber-400/70">YOUR LIBRARY</span>
-      </div>
+  {:else}
+    {#if !readingEssay && !readingEssayLoading}
+    <nav class="pub-view-nav" aria-label="Feed and library">
+      <button
+        type="button"
+        class="pub-view-tab"
+        class:pub-view-tab--active={viewMode === 'feed'}
+        onclick={selectFeedTab}
+      >
+        Feed
+      </button>
+      {#if currentUser}
+        <button
+          type="button"
+          class="pub-view-tab"
+          class:pub-view-tab--active={viewMode === 'library'}
+          onclick={selectLibraryTab}
+        >
+          Library
+        </button>
+      {/if}
+    </nav>
+    {/if}
 
-      <div class="feed-list">
-        {#if essaysLoading && !essaysLoadedOnce}
-          <div class="writing-empty py-8">Loading your writings…</div>
-        {:else if essays.length === 0}
-          <div class="writing-empty py-8">
-            <div class="mb-1 text-zinc-300">No writings yet in your library.</div>
-            <div class="text-[11px] text-zinc-500">Tap WRITE to create your first essay.</div>
-          </div>
-        {:else}
-          {#if drafts.length > 0}
-            <div class="px-1 pb-1 text-[9px] tracking-[1.5px] text-amber-400/70 font-medium">DRAFTS</div>
-            {#each drafts as essay (essay.id)}
-              <button 
-                class="feed-entry block text-left w-full rounded-xl" 
-                onclick={() => openEditorForEssay(essay)}
+  {#if currentUser && viewMode === 'library'}
+    <div class="pub-scroll flex-1 min-h-0 overflow-y-auto no-scrollbar">
+      {#if essaysLoading && !essaysLoadedOnce}
+        <div class="pub-empty">Loading your writings…</div>
+      {:else if libraryEssays.length === 0}
+        <div class="pub-empty">
+          <div class="pub-empty-title">No writings yet.</div>
+          <div class="pub-empty-hint">Tap the write button to start your first essay.</div>
+        </div>
+      {:else}
+        {#each libraryEssays as essay (essay.id)}
+          <button type="button" class="pub-library-item" onclick={() => openEditorForEssay(essay)}>
+            <div class="pub-library-item-top">
+              <span
+                class="pub-status-chip"
+                class:pub-status-chip--public={essay.is_public}
               >
-                <div class="feed-title text-[17px] leading-tight font-semibold text-white mb-1.5 line-clamp-2">
-                  {essay.title || 'Untitled'}
-                </div>
-                <div class="flex items-center justify-between text-[11px]">
-                  <span class="feed-badge feed-badge--draft">DRAFT</span>
-                  <span class="text-zinc-500">
-                    {new Date(essay.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {estimateReadTimeMinutes(essay.content)} min read
-                  </span>
-                </div>
-              </button>
-            {/each}
-          {/if}
-
-          {#if published.length > 0}
-            <div class="px-1 pt-2 pb-1 text-[9px] tracking-[1.5px] text-emerald-400/70 font-medium">PUBLISHED</div>
-            {#each published as essay (essay.id)}
-              <button 
-                class="feed-entry block text-left w-full rounded-xl" 
-                onclick={() => openEditorForEssay(essay)}
-              >
-                <div class="feed-title text-[17px] leading-tight font-semibold text-white mb-1.5 line-clamp-2">
-                  {essay.title || 'Untitled'}
-                </div>
-                <div class="flex items-center justify-between text-[11px]">
-                  <span class="feed-badge feed-badge--public">PUBLIC</span>
-                  <span class="text-zinc-500">
-                    {new Date(essay.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {estimateReadTimeMinutes(essay.content)} min read
-                  </span>
-                </div>
-              </button>
-            {/each}
-          {/if}
-        {/if}
-      </div>
+                {essay.is_public ? 'Public' : 'Private'}
+              </span>
+              <span class="pub-library-item-meta">
+                {estimateReadTimeMinutes(essay.content)} min &nbsp;·&nbsp; {formatFeedDate(essay.updated_at)}
+              </span>
+            </div>
+            <div class="pub-library-item-title">{essay.title || 'Untitled'}</div>
+          </button>
+        {/each}
+      {/if}
     </div>
   {:else}
-    <!-- PUBLIC FEED: other users' published essays (newest first), excluding your own -->
-    <div class="flex flex-col flex-1 min-h-0 overflow-hidden px-1 pt-1">
-      <div class="pt-1 pb-2">
-        <div class="mb-3 flex items-center justify-between px-1">
-          <div>
-            <span class="text-[9px] font-semibold tracking-[1.75px] text-emerald-400/70">PUBLIC FEED</span>
-          </div>
-          <div class="text-[10px] text-zinc-500">
-            Writings from the community
-          </div>
+    <div class="pub-scroll flex-1 min-h-0 overflow-y-auto no-scrollbar">
+      {#if readingEssayLoading}
+        <div class="pub-empty">Loading article…</div>
+      {:else if readingEssayError}
+        <div class="pub-empty">
+          <div class="pub-empty-title">{readingEssayError}</div>
+          <button type="button" class="pub-article-back-link" onclick={closeArticle}>← Back to feed</button>
         </div>
-
-        <div class="feed-list">
-          {#if publicFeedLoading}
-            <div class="writing-empty py-8">Loading public feed…</div>
-          {:else if publicFeed.length === 0}
-            <div class="writing-empty py-8">
-              <div class="mb-1 text-zinc-300">The feed is quiet right now.</div>
-              <div class="text-[11px] text-zinc-500">Be the first to publish something for others to see.</div>
-            </div>
-          {:else}
-            {#each publicFeed as essay (essay.id)}
-              <a href={`/post/${essay.slug}`} class="feed-entry block no-underline rounded-xl">
-                <!-- Author header -->
-                <div class="flex items-center gap-2.5 mb-2.5">
-                  {#key essay.author_avatar_seed}
-                    <div class="shrink-0 w-6 h-6 bg-[#1f1f1f] rounded-[4px] ring-1 ring-zinc-800 ring-offset-1 ring-offset-[#0a0a0a] overflow-hidden">
-                      <GeneratedAvatar 
-                        userId={essay.user_id} 
-                        seed={essay.author_avatar_seed} 
-                        size={24} 
-                        rounded={0}
-                      />
-                    </div>
-                  {/key}
-                  <div class="flex items-center gap-1.5 min-w-0">
-                    <span class="font-medium text-[13px] text-zinc-200 truncate">
-                      {essay.author_username || 'anonymous'}
-                    </span>
-                    <span class="text-zinc-600">·</span>
-                    <span class="text-[11px] text-zinc-500 tabular-nums whitespace-nowrap">
-                      {new Date(essay.published_at || essay.updated_at).toLocaleDateString(undefined, { 
-                        month: 'short', 
-                        day: 'numeric' 
-                      })}
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Title -->
-                <div class="feed-title text-[18px] leading-[1.25] font-semibold tracking-[-0.015em] text-white mb-1.5 line-clamp-3">
-                  {essay.title || 'Untitled'}
-                </div>
-
-                <!-- Excerpt -->
-                <div class="feed-excerpt text-[13.5px] leading-[1.4] text-zinc-400 line-clamp-2 mb-3">
-                  {getExcerpt(essay.content, 155)}
-                </div>
-
-                <!-- Meta footer -->
-                <div class="flex items-center">
-                  <span class="text-[11px] text-zinc-500 font-medium tracking-wide">
-                    {estimateReadTimeMinutes(essay.content)} min read
-                  </span>
-                </div>
-              </a>
-            {/each}
-          {/if}
+      {:else if readingEssay}
+        <article class="pub-article">
+          <h1 class="pub-article-title">{readingEssay.title || 'Untitled'}</h1>
+          <div class="pub-article-byline">
+            {#key readingEssay.author_avatar_seed}
+              <div class="pub-author-avatar">
+                <GeneratedAvatar
+                  userId={readingEssay.user_id}
+                  seed={readingEssay.author_avatar_seed}
+                  size={24}
+                  rounded={0}
+                />
+              </div>
+            {/key}
+            <span class="pub-author-meta">
+              {readingEssay.author_username || 'Anonymous'} &nbsp;·&nbsp;
+              {new Date(readingEssay.published_at || readingEssay.updated_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} &nbsp;·&nbsp;
+              {estimateReadTimeMinutes(readingEssay.content)} min
+            </span>
+          </div>
+          <div class="pub-article-prose reader-prose markdown-content">
+            {@html renderEssay(readingEssay.content)}
+          </div>
+        </article>
+      {:else if isFeedSearching}
+        {#if searchLoading}
+          <div class="pub-empty">Searching…</div>
+        {:else if searchResults.length === 0}
+          <div class="pub-empty">
+            <div class="pub-empty-title">No essays match "{feedSearchQuery.trim()}".</div>
+            <div class="pub-empty-hint">Try a different title, author, or phrase.</div>
+          </div>
+        {:else}
+          {#each searchResults as item, i (item.id)}
+            <article class="pub-feed-item" class:pub-feed-item--last={i === searchResults.length - 1}>
+              {@render feedAuthorRow(item)}
+              {@render feedCard(item)}
+            </article>
+          {/each}
+        {/if}
+      {:else if publicFeedLoading}
+        <div class="pub-empty">Loading essays…</div>
+      {:else if publicFeed.length === 0}
+        <div class="pub-empty">
+          <div class="pub-empty-title">The feed is quiet right now.</div>
+          <div class="pub-empty-hint">Be the first to publish something.</div>
         </div>
-      </div>
+      {:else}
+        {@const featured = publicFeed[0]}
+        {@const rest = publicFeed.slice(1)}
+        <article class="pub-featured">
+          <div class="pub-tag">Latest</div>
+          {@render feedAuthorRow(featured)}
+          {@render feedCard(featured, true)}
+        </article>
+
+        {#each rest as item, i}
+          <article class="pub-feed-item" class:pub-feed-item--last={i === rest.length - 1}>
+            {@render feedAuthorRow(item)}
+            {@render feedCard(item)}
+          </article>
+        {/each}
+      {/if}
     </div>
   {/if}
+  {/if}
+    </div>
+
+    {#if !isWriting && !readingEssay && !readingEssayLoading}
+      <button
+        type="button"
+        class="pub-write-fab"
+        onclick={handleWriteFabClick}
+        aria-label={currentUser ? 'Write new essay' : 'Sign in to write'}
+      >
+        <Plus class="size-5" aria-hidden="true" />
+      </button>
+    {/if}
   </div>
   {/if}
 
@@ -2244,30 +2380,66 @@
   </div>
   </div>
 
-  <div class="app-footer flex items-baseline justify-center gap-x-1 text-center text-[9px] tracking-[0.5px] text-zinc-500 shrink-0 leading-none">
+  <div class="app-footer">
     <a
       href="https://github.com/Kono-o/tractatus"
       target="_blank"
       rel="noopener noreferrer"
-      class="hover:text-zinc-300 active:text-white transition-colors"
       title="Click to visit the Tractatus GitHub repo. Ctrl+click (or Cmd+click) the left side for the update demo, right side for the post-update demo."
     >
       <span
-        class="cursor-pointer hover:text-zinc-300 active:text-white transition-colors"
+        role="button"
+        tabindex="0"
+        class="app-footer__brand"
         onclick={(e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); manuallyOpenUpdateMenu(); } }}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (e.ctrlKey || e.metaKey) manuallyOpenUpdateMenu(); } }}
       >
-        TRACTATUS v{APP_VERSION}
+        Tractatus v{APP_VERSION}
       </span>
-      <span class="text-zinc-500 select-none">—</span>
+      <span class="app-footer__sep" aria-hidden="true">—</span>
       <span
-        class="cursor-pointer hover:text-zinc-300 active:text-white transition-colors"
+        role="button"
+        tabindex="0"
+        class="app-footer__rights"
         onclick={(e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); manuallyOpenPostUpdateMenu(); } }}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (e.ctrlKey || e.metaKey) manuallyOpenPostUpdateMenu(); } }}
       >
         All rights reserved by Arya.
       </span>
     </a>
   </div>
 </div>
+
+{#if showAuthPanel && !currentUser}
+  <div
+    class="settings-panel-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Sign in or sign up"
+    tabindex="-1"
+    onclick={(e) => { if (e.target === e.currentTarget) closeAuthPanel(); }}
+  >
+    <div
+      class="settings-panel-dialog auth-overlay-dialog rounded-xl shadow-xl overflow-hidden text-left"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <div class="settings-panel-header">
+        <span class="settings-panel-brand__lift">Tractatus</span>
+        <button
+          type="button"
+          aria-label="Close"
+          class="settings-panel-header__close"
+          onclick={closeAuthPanel}
+        >
+          <X class="size-3.5" />
+        </button>
+      </div>
+      <div class="settings-panel-body auth-overlay-body">
+        <AuthScreen embedded onAuthenticated={handleAuthSuccess} />
+      </div>
+    </div>
+  </div>
+{/if}
 
 <!-- Account menu / backend panel (identical UX to Lift Tracker account menu, without LT-specific data) -->
 {#if showSettingsPanel}
@@ -2279,42 +2451,18 @@
     tabindex="-1"
     onclick={(e) => { if (e.target === e.currentTarget) closeSettingsPanel(); }}
   >
-    <div class="settings-panel-dialog rounded-xl border border-[#1e1e1e] bg-[#141414] shadow-xl overflow-hidden text-left">
+    <div class="settings-panel-dialog rounded-xl shadow-xl overflow-hidden text-left">
       <div class="settings-panel-header">
-        <div class="settings-panel-header__title">
-          <div class="settings-panel-brand" aria-hidden="true">
-            <span class="settings-panel-brand__lift">TRACTATUS</span>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="settings-panel-header__supabase" aria-label="Supabase connection">
-            <span class="settings-panel-header__supabase-label">Supabase</span>
-            <span class="settings-panel-header__dot-wrap" aria-hidden="true">
-              <span
-                class="db-io-dot settings-panel-header__dot"
-                class:db-io-dot--active={!!supabasePanel && supabasePanel.health.ok && supabasePanel.sessionOk}
-              ></span>
-            </span>
-            <span class="settings-panel-header__latency">
-              {#if supabasePanelLoading}
-                …
-              {:else if supabasePanel?.health.latencyMs != null}
-                {formatSupabaseLatencyMs(supabasePanel.health.latencyMs)}
-              {:else}
-                —
-              {/if}
-            </span>
-          </div>
-          <button
-            type="button"
-            aria-label="Close"
-            class="settings-panel-header__close"
-            disabled={accountBusy}
-            onclick={closeSettingsPanel}
-          >
-            <X class="size-3.5" />
-          </button>
-        </div>
+        {@render panelHeaderRow()}
+        <button
+          type="button"
+          aria-label="Close"
+          class="settings-panel-header__close"
+          disabled={accountBusy}
+          onclick={closeSettingsPanel}
+        >
+          <X class="size-3.5" />
+        </button>
       </div>
 
       <div class="settings-panel-body text-[10px] leading-snug">
@@ -2614,29 +2762,23 @@
     aria-label="Update available"
     tabindex="-1"
   >
-    <div class="settings-panel-dialog rounded-xl border border-[#1e1e1e] bg-[#141414] shadow-xl overflow-hidden text-left">
+    <div class="settings-panel-dialog rounded-xl shadow-xl overflow-hidden text-left">
       <div class="settings-panel-header">
-        <div class="settings-panel-header__title">
-          <div class="settings-panel-brand" aria-hidden="true">
-            <span class="settings-panel-brand__lift">TRACTATUS</span>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            aria-label="Close"
-            class="settings-panel-header__close"
-            disabled={updateInstalling}
-            onclick={closeUpdatePrompt}
-          >
-            <X class="size-3.5" />
-          </button>
-        </div>
+        {@render panelHeaderRow()}
+        <button
+          type="button"
+          aria-label="Close"
+          class="settings-panel-header__close"
+          disabled={updateInstalling}
+          onclick={closeUpdatePrompt}
+        >
+          <X class="size-3.5" />
+        </button>
       </div>
 
       <div class="settings-panel-body text-[10px] leading-snug">
         <div class="flex flex-col items-center text-center">
-          <div class="inline-flex items-center gap-1.5 rounded-full bg-emerald-950/60 px-3 py-0.5 text-emerald-400 text-[10px] font-medium tracking-[1.5px]">
+          <div class="update-badge">
             UPDATE AVAILABLE
             {#if updateInfo.size}
               · {(updateInfo.size / 1024 / 1024).toFixed(1)} MB
@@ -2645,26 +2787,26 @@
 
           <div class="mt-2 flex items-center gap-3">
             <div class="flex flex-col items-center">
-              <div class="update-version-num text-zinc-400">v{APP_VERSION}</div>
+              <div class="update-version-num update-version-num--muted">v{APP_VERSION}</div>
             </div>
 
-            <div class="text-emerald-500 text-2xl leading-none">→</div>
+            <div class="update-version-arrow" aria-hidden="true">→</div>
 
             <div class="flex flex-col items-center">
-              <div class="update-version-num font-semibold text-emerald-400">v{updateInfo.version}</div>
+              <div class="update-version-num update-version-num--new">v{updateInfo.version}</div>
             </div>
           </div>
         </div>
 
         {#if updateInfo.notes}
           <div class="mt-3">
-            <div class="mb-1 text-[9px] font-medium tracking-[1px] text-zinc-500">WHAT'S NEW</div>
-            <div class="max-h-40 overflow-auto rounded border border-[#1e1e1e] bg-[#0d0d0d] p-2.5 text-[10px] leading-snug text-zinc-300 markdown-content no-scrollbar">
+            <div class="update-section-label">WHAT'S NEW</div>
+            <div class="update-notes-box max-h-40 overflow-auto rounded p-2.5 text-[10px] leading-snug markdown-content no-scrollbar">
               {@html renderChangelog(updateInfo.notes)}
             </div>
           </div>
         {:else}
-          <p class="mt-3 text-center text-zinc-400">A new version of Tractatus is ready.</p>
+          <p class="update-dialog-copy mt-3">A new version of Tractatus is ready.</p>
         {/if}
 
         {#if updateError && !updateInstalling}
@@ -2673,17 +2815,17 @@
 
         <div class="mt-3 min-h-[1.75rem] flex items-center">
           {#if !updateInstalling}
-            <span class="block text-center text-[10px] text-zinc-400">Install to receive the latest features and fixes.</span>
+            <span class="update-dialog-copy block text-center">Install to receive the latest features and fixes.</span>
           {:else if updateInstalling}
             {#if !isWaitingForUpdatePermission}
               <div class="flex items-center gap-2 w-full">
-                <div class="flex-1 h-1.5 rounded bg-[#1e1e1e] overflow-hidden">
+                <div class="flex-1 h-1.5 rounded bg-[color:var(--surf)] overflow-hidden border border-[color:var(--border)]">
                   <div
                     class="h-1.5 bg-emerald-500 transition-[width] duration-75"
                     style="width: {updateDownloadProgress}%"
                   ></div>
                 </div>
-                <span class="text-[10px] text-zinc-400 tabular-nums w-8 text-right">{updateDownloadProgress}%</span>
+                <span class="update-dialog-copy tabular-nums w-8 text-right">{updateDownloadProgress}%</span>
               </div>
             {/if}
             {#if updateError}
@@ -2696,7 +2838,7 @@
           <button
             type="button"
             class={updateInstalling && !updateError
-              ? 'settings-panel-action-btn settings-panel-action-btn--full pointer-events-none opacity-70 border-[#1e1e1e] text-zinc-400'
+              ? 'settings-panel-action-btn settings-panel-action-btn--full pointer-events-none opacity-70'
               : 'settings-panel-action-btn settings-panel-action-btn--full settings-panel-action-btn--update-primary'}
             disabled={updateInstalling && !updateError}
             onclick={startUpdateInstall}
@@ -2728,49 +2870,43 @@
     aria-label="App updated"
     tabindex="-1"
   >
-    <div class="settings-panel-dialog rounded-xl border border-[#1e1e1e] bg-[#141414] shadow-xl overflow-hidden text-left">
+    <div class="settings-panel-dialog rounded-xl shadow-xl overflow-hidden text-left">
       <div class="settings-panel-header">
-        <div class="settings-panel-header__title">
-          <div class="settings-panel-brand" aria-hidden="true">
-            <span class="settings-panel-brand__lift">TRACTATUS</span>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            aria-label="Close"
-            class="settings-panel-header__close"
-            onclick={closePostUpdate}
-          >
-            <X class="size-3.5" />
-          </button>
-        </div>
+        {@render panelHeaderRow()}
+        <button
+          type="button"
+          aria-label="Close"
+          class="settings-panel-header__close"
+          onclick={closePostUpdate}
+        >
+          <X class="size-3.5" />
+        </button>
       </div>
 
       <div class="settings-panel-body text-[10px] leading-snug">
         <div class="flex flex-col items-center text-center">
-          <div class="inline-flex items-center gap-1.5 rounded-full bg-emerald-950/60 px-3 py-0.5 text-emerald-400 text-[10px] font-medium tracking-[1.5px]">
+          <div class="update-badge">
             UPDATED
-            <Check class="size-3.5" />
+            <Check class="size-3.5" aria-hidden="true" />
           </div>
 
           <div class="mt-2 flex items-center gap-3">
             <div class="flex flex-col items-center">
-              <div class="update-version-num font-semibold text-emerald-400">v{postUpdateVersion}</div>
+              <div class="update-version-num update-version-num--new">v{postUpdateVersion}</div>
             </div>
           </div>
         </div>
 
         {#if postUpdateNotes}
           <div class="mt-3">
-            <div class="mb-1 text-[9px] font-medium tracking-[1px] text-zinc-500">WHAT'S NEW</div>
-            <div class="max-h-44 overflow-auto rounded border border-[#1e1e1e] bg-[#0d0d0d] p-2 text-[10px] leading-snug text-zinc-300 markdown-content no-scrollbar">
+            <div class="update-section-label">WHAT'S NEW</div>
+            <div class="update-notes-box max-h-44 overflow-auto rounded p-2 text-[10px] leading-snug markdown-content no-scrollbar">
               {@html renderChangelog(postUpdateNotes)}
             </div>
-            <span class="mt-2 block text-center text-[10px] text-zinc-400">Thanks for staying up to date!</span>
+            <span class="update-dialog-copy mt-2 block text-center">Thanks for staying up to date!</span>
           </div>
         {:else}
-          <p class="mt-3 text-center text-zinc-400">You're now running the latest version.</p>
+          <p class="update-dialog-copy mt-3 text-center">You're now running the latest version.</p>
         {/if}
 
         <div class="mt-3 grid grid-cols-1 gap-2">

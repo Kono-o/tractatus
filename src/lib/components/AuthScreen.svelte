@@ -5,12 +5,9 @@
     CircleCheck,
     Lock,
     LockKeyhole,
-    Mail,
-    PenLine,
     RefreshCw,
     User,
   } from '@lucide/svelte';
-  import AuthBrandIcon from '$lib/components/auth-brand-icons.svelte';
   import {
     db,
     isSupabaseConfigured,
@@ -24,7 +21,7 @@
   } from '$lib/db';
   import { APP_VERSION } from '$lib/version';
 
-  let { onAuthenticated }: { onAuthenticated?: () => void } = $props();
+  let { onAuthenticated, embedded = false }: { onAuthenticated?: () => void; embedded?: boolean } = $props();
 
   let signingIn = $state(false);
   let authError = $state<string | null>(null);
@@ -34,7 +31,7 @@
   let authFeedbackExitTimer: ReturnType<typeof setTimeout> | null = null;
   const AUTH_FEEDBACK_CROSSFADE_MS = 240;
 
-  let authMode = $state<'signin' | 'signup'>('signup');
+  let authMode = $state<'signin' | 'signup'>('signin');
   let authUsername = $state('');
   let authPassword = $state('');
   let authConfirmPassword = $state('');
@@ -126,10 +123,10 @@
       if (value === 'signin' || value === 'signup') {
         authMode = value;
       } else {
-        authMode = 'signup';
+        authMode = 'signin';
       }
     } catch {
-      authMode = 'signup';
+      authMode = 'signin';
     }
   }
 
@@ -197,96 +194,60 @@
   });
 </script>
 
-<div class="flex flex-1 flex-col items-center justify-center pt-0 pb-10 px-2 gap-6 text-center min-h-0 -translate-y-6">
-  <div class="w-20 h-20 rounded-2xl bg-[#141414] border border-[#1e1e1e] flex items-center justify-center transition-all duration-200 hover:border-[#2a2a2a]">
-    <PenLine class="size-10 text-zinc-400" />
-  </div>
-
-  <div class="text-center">
-    <div class="text-6xl font-bold tracking-[8px] text-white">TRACTATUS</div>
-    <div class="text-[10px] tracking-[2px] text-emerald-400/70 mt-1">v{APP_VERSION}</div>
-  </div>
+<div class="auth-screen" class:auth-screen--embedded={embedded}>
+  {#if !embedded}
+    <div class="auth-screen-hero">
+      <h1 class="auth-screen-logo">Tractatus</h1>
+      <p class="auth-screen-version">v{APP_VERSION}</p>
+    </div>
+  {/if}
 
   {#if !isSupabaseConfigured}
-    <p class="max-w-sm text-[10px] leading-snug text-amber-400/90 border border-amber-900/50 bg-amber-950/30 rounded-lg px-3 py-2">
-      Supabase is not configured. Set <code class="text-amber-200/90">PUBLIC_SUPABASE_URL</code> and
-      <code class="text-amber-200/90">PUBLIC_SUPABASE_ANON_KEY</code> in Vercel, then redeploy.
+    <p class="auth-screen-alert">
+      Supabase is not configured. Set <code>PUBLIC_SUPABASE_URL</code> and
+      <code>PUBLIC_SUPABASE_ANON_KEY</code> in Vercel, then redeploy.
     </p>
   {/if}
 
-  <div class="auth-panel-card rounded-xl border border-[#1e1e1e] bg-[#141414] overflow-hidden">
-    <div class="p-1 border-b border-[#1e1e1e] bg-[#111]">
-      <div
-        class="relative grid grid-cols-2 rounded border border-[#1e1e1e] bg-[#0a0a0a] p-0.5"
-        role="group"
-        aria-label="Authentication mode"
-      >
+  <div class="auth-panel-card auth-screen-card">
+    <div class="auth-screen-card-header">
+      <div class="auth-screen-mode" role="group" aria-label="Authentication mode">
         <div
-          class="pointer-events-none absolute top-0.5 bottom-0.5 left-0.5 w-[calc(50%-4px)] rounded bg-white transition-transform duration-200 ease-out"
-          style="transform: translateX({authMode === 'signup' ? '0' : 'calc(100% + 4px)'})"
+          class="auth-screen-mode-pill"
+          style="transform: translateX({authMode === 'signin' ? '0' : '100%'})"
         ></div>
         <button
           type="button"
-          class="relative z-10 h-9 flex items-center justify-center text-[10px] font-black tracking-[0.12em] transition-colors {authMode === 'signup' ? 'text-black' : 'text-zinc-500 hover:text-zinc-300'}"
-          disabled={signingIn}
-          onclick={() => setAuthMode('signup')}
-        >
-          SIGN UP
-        </button>
-        <button
-          type="button"
-          class="relative z-10 h-9 flex items-center justify-center text-[10px] font-black tracking-[0.12em] transition-colors {authMode === 'signin' ? 'text-black' : 'text-zinc-500 hover:text-zinc-300'}"
+          class="auth-screen-mode-btn"
+          class:auth-screen-mode-btn--active={authMode === 'signin'}
           disabled={signingIn}
           onclick={() => setAuthMode('signin')}
         >
-          SIGN IN
+          Sign in
+        </button>
+        <button
+          type="button"
+          class="auth-screen-mode-btn"
+          class:auth-screen-mode-btn--active={authMode === 'signup'}
+          disabled={signingIn}
+          onclick={() => setAuthMode('signup')}
+        >
+          Sign up
         </button>
       </div>
     </div>
 
-    <div class="p-3 text-left">
-      <div class="relative mb-3 hidden" aria-hidden="true">
-        <div class="flex justify-between gap-1.5 pointer-events-none select-none">
-          <div
-            class="relative overflow-hidden after:absolute after:inset-0 after:z-[1] after:bg-black/50 after:pointer-events-none after:content-[''] h-11 w-11 shrink-0 rounded-xl flex items-center justify-center bg-[#0a0a0a] text-zinc-400">
-            <Mail class="size-5 relative z-0" />
-          </div>
-          <div
-            class="relative overflow-hidden after:absolute after:inset-0 after:z-[1] after:bg-black/50 after:pointer-events-none after:content-[''] h-11 w-11 shrink-0 rounded-xl border border-[#30363d] flex items-center justify-center bg-[#24292f] text-white">
-            <AuthBrandIcon brand="github" class="size-5 text-white relative z-0" />
-          </div>
-          <div
-            class="relative overflow-hidden after:absolute after:inset-0 after:z-[1] after:bg-black/50 after:pointer-events-none after:content-[''] h-11 w-11 shrink-0 rounded-xl flex items-center justify-center bg-white">
-            <AuthBrandIcon brand="google" class="size-5 relative z-0" />
-          </div>
-          <div
-            class="relative overflow-hidden after:absolute after:inset-0 after:z-[1] after:bg-black/50 after:pointer-events-none after:content-[''] h-11 w-11 shrink-0 rounded-xl flex items-center justify-center bg-[#5865F2] text-white">
-            <AuthBrandIcon brand="discord" class="size-5 text-white relative z-0" />
-          </div>
-          <div
-            class="relative overflow-hidden after:absolute after:inset-0 after:z-[1] after:bg-black/50 after:pointer-events-none after:content-[''] h-11 w-11 shrink-0 rounded-xl flex items-center justify-center bg-black text-white">
-            <AuthBrandIcon brand="x" class="size-5 text-white relative z-0" />
-          </div>
-        </div>
-        <div
-          class="absolute inset-0 z-10 flex items-center justify-center rounded-xl pointer-events-none px-1">
-          <p
-            class="text-[10px] font-black tracking-[0.1em] uppercase text-white text-center leading-tight"
-            style="text-shadow: 0 0 2px rgba(0,0,0,0.7), 0 1px 2px rgba(0,0,0,0.55);">
-            CURRENTLY UNDER DEVELOPMENT
-          </p>
-        </div>
-      </div>
-
+    <div class="auth-screen-card-body">
       <form
-        class="flex flex-col gap-2.5"
+        class="auth-screen-form"
         onsubmit={(e) => {
           e.preventDefault();
           if (signingIn || authError || authSuccess || !authSubmitReady) return;
           void handleUsernameAuth();
-        }}>
-        <div class="relative">
-          <User class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-500 pointer-events-none" />
+        }}
+      >
+        <div class="auth-screen-field">
+          <User class="auth-screen-field-icon" aria-hidden="true" />
           <input
             type="text"
             autocomplete="username"
@@ -295,16 +256,17 @@
             bind:value={authUsername}
             disabled={signingIn}
             placeholder="username"
-            class="h-11 w-full pl-10 pr-3 rounded-xl bg-[#0a0a0a] border border-[#1e1e1e] text-sm text-white placeholder:text-zinc-600 outline-none focus:border-zinc-500 disabled:opacity-60"
+            class="auth-screen-input"
             oninput={(e) => {
               clearAuthFeedback();
               authUsername = sanitizeUsernameInput((e.currentTarget as HTMLInputElement).value);
             }}
           />
         </div>
-        <div>
-          <div class="relative">
-            <Lock class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-500 pointer-events-none" />
+
+        <div class="auth-screen-field-group">
+          <div class="auth-screen-field">
+            <Lock class="auth-screen-field-icon" aria-hidden="true" />
             <input
               type="password"
               autocomplete={authMode === 'signup' ? 'new-password' : 'current-password'}
@@ -312,21 +274,22 @@
               bind:value={authPassword}
               disabled={signingIn}
               placeholder="••••••••"
-              class="h-11 w-full pl-10 pr-3 rounded-xl bg-[#0a0a0a] border border-[#1e1e1e] text-sm text-white placeholder:text-zinc-600 outline-none focus:border-zinc-500 disabled:opacity-60"
+              class="auth-screen-input"
               oninput={(e) => {
                 clearAuthFeedback();
                 authPassword = sanitizePasswordInput((e.currentTarget as HTMLInputElement).value);
               }}
             />
           </div>
+
           <div
             class="auth-confirm-reveal"
             class:auth-confirm-reveal--open={authMode === 'signup'}
             aria-hidden={authMode !== 'signup'}
           >
             <div class="auth-confirm-reveal__inner">
-              <div class="relative">
-                <LockKeyhole class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-500 pointer-events-none z-10" />
+              <div class="auth-screen-field">
+                <LockKeyhole class="auth-screen-field-icon" aria-hidden="true" />
                 <input
                   type="password"
                   autocomplete="new-password"
@@ -336,27 +299,25 @@
                   placeholder=""
                   tabindex={authMode === 'signup' ? 0 : -1}
                   aria-label="Confirm password"
-                  class="h-11 w-full pl-10 pr-3 rounded-xl bg-[#0a0a0a] border border-[#1e1e1e] text-sm text-white outline-none focus:border-zinc-500 disabled:opacity-60"
+                  class="auth-screen-input"
                   oninput={(e) => {
                     clearAuthFeedback();
                     authConfirmPassword = sanitizePasswordInput((e.currentTarget as HTMLInputElement).value);
                   }}
                 />
                 {#if authMode === 'signup' && !authConfirmPassword}
-                  <span
-                    class="absolute left-10 top-1/2 -translate-y-1/2 text-sm text-zinc-600 pointer-events-none select-none"
-                    aria-hidden="true"
-                  >••••••••</span>
+                  <span class="auth-screen-input-ghost" aria-hidden="true">••••••••</span>
                 {/if}
               </div>
             </div>
           </div>
         </div>
-        <div class="auth-submit-crossfade h-11 min-h-11">
+
+        <div class="auth-submit-crossfade auth-screen-submit-crossfade">
           <button
             type="submit"
-            class="auth-submit-crossfade__layer auth-submit-btn auth-submit-btn--default h-11 min-h-11 rounded-xl font-black text-[11px] tracking-[0.15em] flex items-center justify-center px-3 text-center leading-snug
-              {authSubmitBtnLit ? 'auth-submit-crossfade__layer--lit auth-submit-crossfade__layer--interactive' : ''}
+            class="auth-submit-crossfade__layer auth-submit-btn auth-screen-submit
+              {authSubmitBtnLit ? 'auth-submit-crossfade__layer--lit auth-submit-crossfade__layer--interactive auth-screen-submit--ready' : ''}
               {authFeedbackExiting ? 'auth-submit-crossfade__layer--top' : ''}"
             disabled={signingIn || authFeedbackLit || (!authSubmitReady && !authFeedbackExiting)}
             aria-hidden={!authSubmitBtnLit}
@@ -365,7 +326,7 @@
             tabindex={authSubmitBtnLit ? 0 : -1}
           >
             {#if signingIn}
-              <RefreshCw class="size-4 shrink-0 animate-spin" aria-hidden="true" />
+              <RefreshCw class="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
             {:else}
               {authMode === 'signup' ? 'SIGN UP' : 'SIGN IN'}
             {/if}
@@ -374,8 +335,8 @@
             <div
               role="status"
               aria-live="polite"
-              class="auth-submit-crossfade__layer auth-submit-btn auth-submit-btn--feedback h-11 min-h-11 rounded-xl font-black text-[11px] tracking-[0.15em] flex items-center justify-center px-3 text-center leading-snug
-                {authError ? 'auth-submit-btn--error' : 'auth-submit-btn--success'}
+              class="auth-submit-crossfade__layer auth-submit-btn auth-submit-btn--feedback auth-screen-submit
+                {authError ? 'auth-screen-submit--error' : 'auth-screen-submit--success'}
                 {authFeedbackLit ? 'auth-submit-crossfade__layer--lit auth-submit-crossfade__layer--top' : ''}
                 {authError && authFeedbackLit ? 'auth-submit-btn--error-nudge' : ''}"
               title={authError ?? authSuccess ?? undefined}

@@ -46,8 +46,8 @@ export async function initNativeShell(): Promise<void> {
 	]);
 
 	try {
-		await StatusBar.setStyle({ style: Style.Dark });
-		await StatusBar.setBackgroundColor({ color: '#000000' });
+		await StatusBar.setStyle({ style: Style.Light });
+		await StatusBar.setBackgroundColor({ color: '#f8f4eb' });
 	} catch {
 		/* Status bar APIs vary by platform/version */
 	}

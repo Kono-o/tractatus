@@ -20,25 +20,31 @@
     return Math.abs(hash);
   }
 
+  function paletteFromHash(h: number): { cubeColor: string; bgColor: string } {
+    const hue = h % 360;
+    const saturation = 72 + (h % 17);
+    const lightness = 48 + (h % 9);
+    const hueOffset = ((h >> 5) & 1) === 0 ? 14 : -14;
+    const bgHue = (hue + hueOffset + 360) % 360;
+    const bgSaturation = Math.max(18, saturation - 46);
+    const bgLightness = Math.min(88, lightness + 30);
+
+    return {
+      cubeColor: `hsl(${hue} ${saturation}% ${lightness}%)`,
+      bgColor: `hsl(${bgHue} ${bgSaturation}% ${bgLightness}%)`,
+    };
+  }
+
   const effectiveId = $derived(seed || userId || 'default');
   const hash = $derived(hashCode(effectiveId));
 
   const GRID_SIZE = 5;
   const cellSize = 100 / GRID_SIZE;
 
-  // Compute everything in one derived so the template updates reliably when seed changes
   const avatarData = $derived.by(() => {
     const h = hash;
-    const hue = h % 360;
-    const complement = (hue + 180) % 360;
+    const { cubeColor, bgColor } = paletteFromHash(h);
 
-    const colors = {
-      bg: `hsl(${hue}, 22%, 14%)`,
-      cubeA: `hsl(${hue}, 68%, 62%)`,
-      cubeB: `hsl(${complement}, 68%, 62%)`,
-    };
-
-    // left-right symmetric 5x5 grid
     const g: boolean[][] = [];
     for (let y = 0; y < GRID_SIZE; y++) {
       const row: boolean[] = [];
@@ -55,20 +61,14 @@
       g.push(mirrored);
     }
 
-    // precompute the fills for each cell (using symmetric bit for color)
-    const cells: { x: number; y: number; fill: string }[] = [];
+    const cells: { x: number; y: number }[] = [];
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
-        if (g[y][x]) {
-          const symX = Math.min(x, GRID_SIZE - 1 - x);
-          const bit = (h >> ((y * GRID_SIZE + symX) % 31)) & 1;
-          const fill = bit ? colors.cubeA : colors.cubeB;
-          cells.push({ x, y, fill });
-        }
+        if (g[y][x]) cells.push({ x, y });
       }
     }
 
-    return { colors, cells };
+    return { cubeColor, bgColor, cells };
   });
 </script>
 
@@ -80,17 +80,15 @@
   style={`border-radius: ${borderRadius};`}
   aria-hidden="true"
 >
-  <!-- Background cube -->
-  <rect x="0" y="0" width="100" height="100" fill={avatarData.colors.bg} rx={rounded} />
+  <rect x="0" y="0" width="100" height="100" fill={avatarData.bgColor} rx={rounded} />
 
-  <!-- Unique pattern (symmetric permutation based on user ID + seed) as nested inner cubes -->
   {#each avatarData.cells as cell (cell.x + '-' + cell.y)}
     <rect
       x={cell.x * cellSize + 2}
       y={cell.y * cellSize + 2}
       width={cellSize - 4}
       height={cellSize - 4}
-      fill={cell.fill}
+      fill={avatarData.cubeColor}
       rx="2"
     />
   {/each}

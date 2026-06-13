@@ -789,23 +789,36 @@ export const db = {
 		return (count ?? 0) === 0;
 	},
 
-	/** Public feed: all published essays from other users, newest first */
-	async listPublicFeed(): Promise<Essay[]> {
-		const { data: { user } } = await supabase.auth.getUser();
-		const uid = user?.id;
+	/** Search all public essays (includes the current user's published work). */
+	async searchPublicEssays(query: string, limit = 50): Promise<Essay[]> {
+		const term = query.trim();
+		if (!term) return [];
 
-		let query = supabase
+		const escaped = term.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+		const pattern = `%${escaped}%`;
+
+		const { data, error } = await supabase
+			.from('essays')
+			.select('*')
+			.eq('is_public', true)
+			.or(`title.ilike.${pattern},content.ilike.${pattern},author_username.ilike.${pattern}`)
+			.order('published_at', { ascending: false, nullsFirst: false })
+			.order('updated_at', { ascending: false })
+			.limit(limit);
+
+		if (error) throw error;
+		return (data ?? []) as Essay[];
+	},
+
+	/** Public feed: all published essays, newest first (includes the current user). */
+	async listPublicFeed(): Promise<Essay[]> {
+		const { data, error } = await supabase
 			.from('essays')
 			.select('*')
 			.eq('is_public', true)
 			.order('published_at', { ascending: false, nullsFirst: false })
 			.order('updated_at', { ascending: false });
 
-		if (uid) {
-			query = query.neq('user_id', uid);
-		}
-
-		const { data, error } = await query;
 		if (error) throw error;
 		return (data ?? []) as Essay[];
 	},
