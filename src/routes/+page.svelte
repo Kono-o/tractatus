@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { fly } from 'svelte/transition';
   import GeneratedAvatar from '$lib/components/GeneratedAvatar.svelte';
   import {
     db,
@@ -20,6 +21,7 @@
     estimateReadTimeMinutes,
   } from '$lib/db';
   import AuthScreen from '$lib/components/AuthScreen.svelte';
+  import RichEditor from '$lib/components/RichEditor.svelte';
   // IMPORTANT: updater (and thus all @capacitor/* modules) must NOT be statically imported.
   // Static imports of native-only code cause 500 Internal Server Errors during SSR on Vercel.
   // We use dynamic import() only from client-side code (onMount + event handlers).
@@ -29,6 +31,7 @@
   import type { User as SupabaseUser } from '@supabase/supabase-js';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
+  import hljs from 'highlight.js';
   import confetti from 'canvas-confetti';
   import {
     loadSupabasePanelSnapshot,
@@ -44,7 +47,6 @@
     LogOut,
     Pencil,
     RefreshCw,
-    Save,
     Trash2,
     Undo2,
     Redo2,
@@ -73,11 +75,15 @@
   } from '@lucide/svelte';
 
   const FEED_SEARCH_DEBOUNCE_MS = 280;
-  const FEED_EXCERPT_FEATURED = 220;
-  const FEED_EXCERPT_ITEM = 100;
+  const FEED_EXCERPT_FEATURED = 400;
+  const FEED_EXCERPT_ITEM = 160;
 
   function formatFeedDate(iso: string): string {
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  function fmtReadTime(n: number): string {
+    return n === 1 ? '~1 min' : `~${n} mins`;
   }
 
   function selectFeedTab() {
@@ -103,9 +109,9 @@
   function preprocessMarkdown(md: string): string {
     if (!md) return '';
     let out = md;
-    out = out.replace(/==(.+?)==/g, '<mark>$1</mark>');
+    out = out.replace(/(?<!=)==(.+?)==(?!=)/g, '<mark>$1</mark>');
     out = out.replace(/\^(.+?)\^/g, '<sup>$1</sup>');
-    out = out.replace(/~(.+?)~/g, '<sub>$1</sub>');
+    out = out.replace(/(?<!~)~(?!~)(.+?)~(?!~)/g, '<sub>$1</sub>');
     out = out.replace(/::: (center|left|right)\s*([\s\S]*?):::/g, (_m, align, inner) => {
       return `<div style="text-align:${align}">${inner.trim()}</div>`;
     });
@@ -119,15 +125,26 @@
     }
     const pre = preprocessMarkdown(md);
     const raw = marked.parse(pre, { breaks: true, gfm: true }) as string;
-    return DOMPurify.sanitize(raw, {
+    const highlighted = raw.replace(/<pre><code(\s+class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g, (_m, cls, code) => {
+      const decoded = code
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+      const result = hljs.highlightAuto(decoded);
+      return `<pre><code class="hljs language-${result.language}">${result.value}</code></pre>`;
+    });
+    return DOMPurify.sanitize(highlighted, {
       ALLOWED_TAGS: [
         'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'del',
         'ul', 'ol', 'li', 'a', 'code', 'pre',
         'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'blockquote', 'hr', 'mark', 'sup', 'sub', 'div', 'span',
         'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'img',
       ],
-      ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class'],
+      ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class', 'src', 'alt'],
     });
   }
 
@@ -164,70 +181,7 @@
     else closeArticle();
   }
 
-  let feedSearchQuery = $state('');
-  let searchResults = $state<Essay[]>([]);
-  let searchLoading = $state(false);
-  let searchExpanded = $state(false);
-  let searchInputEl = $state<HTMLInputElement | null>(null);
-  let feedSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  let isFeedSearching = $derived(feedSearchQuery.trim().length > 0);
-
-  async function runFeedSearch(query: string) {
-    const term = query.trim();
-    if (!term) {
-      searchResults = [];
-      searchLoading = false;
-      return;
-    }
-    searchLoading = true;
-    try {
-      searchResults = await db.searchPublicEssays(term);
-    } catch (e) {
-      console.warn('[feed] search failed', e);
-      searchResults = [];
-    } finally {
-      searchLoading = false;
-    }
-  }
-
-  function onFeedSearchInput(value: string) {
-    feedSearchQuery = value;
-    if (value.trim()) viewMode = 'feed';
-    if (feedSearchDebounceTimer) clearTimeout(feedSearchDebounceTimer);
-    if (!value.trim()) {
-      searchResults = [];
-      searchLoading = false;
-      return;
-    }
-    searchLoading = true;
-    feedSearchDebounceTimer = setTimeout(() => {
-      void runFeedSearch(value);
-    }, FEED_SEARCH_DEBOUNCE_MS);
-  }
-
-  async function toggleSearch() {
-    searchExpanded = !searchExpanded;
-    if (searchExpanded) {
-      await tick();
-      searchInputEl?.focus();
-      return;
-    }
-    feedSearchQuery = '';
-    searchResults = [];
-    searchLoading = false;
-    if (feedSearchDebounceTimer) {
-      clearTimeout(feedSearchDebounceTimer);
-      feedSearchDebounceTimer = null;
-    }
-  }
-
-  function onSearchKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (searchExpanded) void toggleSearch();
-    }
-  }
 
   function focusExerciseNameInput(node: HTMLInputElement) {
     node.focus();
@@ -320,6 +274,7 @@
   let essays = $state<Essay[]>([]);
   let essaysLoading = $state(false);
   let essaysLoadedOnce = $state(false);
+  let libraryExcerpts = $state<Map<string, string>>(new Map());
 
   let isWriting = $state(false);
   let currentEssayId = $state<string | null>(null);
@@ -333,7 +288,6 @@
   let saveError = $state<string | null>(null);
   let deleteHoldProgress = $state(0);
   let deleteHoldTimer: ReturnType<typeof setInterval> | null = null;
-  let deleteTapPulseActive = $state(false);
 
   // Undo / Redo stacks (simple content snapshots)
   let undoStack = $state<Array<{ title: string; content: string; slug: string }>>([]);
@@ -358,7 +312,57 @@
     ),
   );
 
-  let editorWordCount = $derived((editorContent || '').trim().split(/\s+/).filter(Boolean).length);
+  let librarySearchQuery = $state('');
+  let filteredLibraryEssays = $derived.by(() => {
+    const q = librarySearchQuery.trim().toLowerCase();
+    if (!q) return libraryEssays;
+    return libraryEssays.filter(
+      e =>
+        (e.title || '').toLowerCase().includes(q) ||
+        getExcerpt(e.content, 300).toLowerCase().includes(q),
+    );
+  });
+
+  let libraryDeleteTargetId = $state<string | null>(null);
+  let libraryDeleteProgress = $state(0);
+  let libraryDeleteTimer: ReturnType<typeof setInterval> | null = null;
+
+  function stopLibraryDeleteHold() {
+    if (libraryDeleteTimer) clearInterval(libraryDeleteTimer);
+    libraryDeleteTimer = null;
+    libraryDeleteProgress = 0;
+    libraryDeleteTargetId = null;
+  }
+
+  function startLibraryDeleteHold(essayId: string) {
+    libraryDeleteTargetId = essayId;
+    const startTime = Date.now();
+    libraryDeleteProgress = 0;
+    libraryDeleteTimer = setInterval(() => {
+      libraryDeleteProgress = Math.min(((Date.now() - startTime) / 1100) * 100, 100);
+      if (libraryDeleteProgress >= 100) {
+        clearInterval(libraryDeleteTimer!);
+        libraryDeleteTimer = null;
+        libraryDeleteProgress = 0;
+        libraryDeleteTargetId = null;
+        void performLibraryDelete(essayId);
+      }
+    }, 16);
+  }
+
+  async function performLibraryDelete(essayId: string) {
+    try {
+      await db.deleteEssay(essayId);
+      essays = essays.filter(e => e.id !== essayId);
+    } catch (e) {
+      console.error('[library] delete failed', e);
+    }
+  }
+
+  function countWords(s: string): number {
+    return (s || '').trim().split(/\s+/).filter(Boolean).length;
+  }
+  let editorWordCount = $derived(countWords(editorContent));
   let editorReadMins = $derived(estimateReadTimeMinutes(editorContent));
 
   let currentEssay = $derived(essays.find(e => e.id === currentEssayId) ?? null);
@@ -372,6 +376,84 @@
   let publicFeed = $state<Essay[]>([]);
   let publicFeedLoading = $state(false);
   let publicFeedLoadedOnce = $state(false);
+  let feedRefreshing = $state(false);
+  let feedPullY = $state(0);
+  let feedScrollEl = $state<HTMLElement | null>(null);
+  let feedTouchStartY = $state(0);
+  let feedTouchId = $state<number | null>(null);
+  let searchQuery = $state('');
+  let searchResults = $state<Essay[]>([]);
+  let searchLoading = $state(false);
+  let searchExpanded = $state(false);
+  let searchInputEl = $state<HTMLInputElement | null>(null);
+  let feedSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let isFeedSearching = $derived(searchQuery.trim().length > 0 && viewMode === 'feed');
+
+  async function runFeedSearch(query: string) {
+    const term = query.trim();
+    if (!term) {
+      searchResults = [];
+      searchLoading = false;
+      return;
+    }
+    searchLoading = true;
+    try {
+      searchResults = await db.searchPublicEssays(term);
+    } catch (e) {
+      console.warn('[feed] search failed', e);
+      searchResults = [];
+    } finally {
+      searchLoading = false;
+    }
+  }
+
+  function onSearchInput(value: string) {
+    searchQuery = value;
+    if (viewMode === 'library') {
+      librarySearchQuery = value;
+      return;
+    }
+    if (value.trim()) viewMode = 'feed';
+    if (feedSearchDebounceTimer) clearTimeout(feedSearchDebounceTimer);
+    if (!value.trim()) {
+      searchResults = [];
+      searchLoading = false;
+      return;
+    }
+    searchLoading = true;
+    feedSearchDebounceTimer = setTimeout(() => {
+      void runFeedSearch(value);
+    }, FEED_SEARCH_DEBOUNCE_MS);
+  }
+
+  async function toggleSearch() {
+    searchExpanded = !searchExpanded;
+    if (searchExpanded) {
+      await tick();
+      searchInputEl?.focus();
+      if (viewMode === 'library') {
+        librarySearchQuery = '';
+        searchQuery = '';
+      }
+      return;
+    }
+    searchQuery = '';
+    librarySearchQuery = '';
+    searchResults = [];
+    searchLoading = false;
+    if (feedSearchDebounceTimer) {
+      clearTimeout(feedSearchDebounceTimer);
+      feedSearchDebounceTimer = null;
+    }
+  }
+
+  function onSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (searchExpanded) void toggleSearch();
+    }
+  }
 
   /** Substack-style excerpt: strip basic markdown and truncate */
   function getExcerpt(content: string, maxLength = 140): string {
@@ -379,12 +461,36 @@
     let text = content
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/`[^`]+`/g, ' ')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .replace(/[#*_~>]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
     if (text.length > maxLength) text = text.slice(0, maxLength).trim() + '…';
     return text;
+  }
+
+  function renderExcerpt(md: string, maxLength = 200): string {
+    if (!md) return '';
+    const processed = md
+      .replace(/(?<!=)==(.+?)==(?!=)/g, '<mark>$1</mark>')
+      .replace(/\^(.+?)\^/g, '<sup>$1</sup>')
+      .replace(/(?<!~)~(.+?)~(?!~)/g, '<sub>$1</sub>');
+    let html = marked.parse(processed, { breaks: true, gfm: true }) as string;
+    html = html.replace(/<pre><code(\s+class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g, (_m, cls, code) => {
+      const decoded = code
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+      const result = hljs.highlightAuto(decoded);
+      return `<pre><code class="hljs language-${result.language}">${result.value}</code></pre>`;
+    });
+    if (html.length > maxLength) {
+      html = html.slice(0, maxLength);
+      const lastSpace = html.lastIndexOf(' ');
+      if (lastSpace > 0) html = html.slice(0, lastSpace);
+      html += '…';
+    }
+    return html;
   }
 
   // Lift Tracker-style primary CTA (for WRITE button matching START WORKOUT)
@@ -1266,6 +1372,11 @@
       const list = await db.listEssays();
       essays = list;
       essaysLoadedOnce = true;
+      const m = new Map<string, string>();
+      for (const e of list) {
+        m.set(e.id, renderExcerpt(e.content, 120));
+      }
+      libraryExcerpts = m;
     } catch (e) {
       console.warn('[essays] load failed', e);
     } finally {
@@ -1346,13 +1457,11 @@
     if (deleteHoldTimer) clearInterval(deleteHoldTimer);
     deleteHoldTimer = null;
     deleteHoldProgress = 0;
-    deleteTapPulseActive = false;
   }
 
   function startDeleteHold(e: Event) {
     if (e.cancelable) e.preventDefault();
     if (isSaving || !currentEssayId) return;
-    deleteTapPulseActive = true;
     const startTime = Date.now();
     deleteHoldTimer = setInterval(() => {
       deleteHoldProgress = Math.min(((Date.now() - startTime) / 1100) * 100, 100);
@@ -1360,14 +1469,9 @@
         clearInterval(deleteHoldTimer!);
         deleteHoldTimer = null;
         deleteHoldProgress = 0;
-        deleteTapPulseActive = false;
         void performDelete();
       }
     }, 16);
-  }
-
-  function onDeleteTapPulseEnd(e: AnimationEvent) {
-    if (e.animationName === 'hold-cancel-tap-pulse') deleteTapPulseActive = false;
   }
 
   async function performDelete() {
@@ -1474,11 +1578,6 @@
     } finally {
       isSaving = false;
     }
-  }
-
-  async function handleSaveDraft() {
-    saveError = null;
-    await saveCurrent(false);
   }
 
   async function handlePublish() {
@@ -1764,13 +1863,6 @@
     scheduleAutoSave();
   }
 
-  // When entering editor from list or new, focus the title or content
-  function focusEditorTitle(node: HTMLInputElement) {
-    // called via use:
-    node.focus();
-    node.select();
-  }
-
   // Load feed for everyone; essays only when signed in
   $effect(() => {
     if (!isAuthLoading && !publicFeedLoadedOnce) {
@@ -1807,144 +1899,172 @@
       class:pub-header--article={articleMode}
     >
       <div class="pub-header-start">
-        {#if writingMode}
-          <button
-            type="button"
-            class="pub-header-icon-btn"
-            onclick={handleHeaderBack}
-            disabled={isSaving}
-            aria-label="Back to feed"
-          >
-            <ArrowLeft class="size-3.5" aria-hidden="true" />
-          </button>
-        {/if}
         <div
           class="pub-header-logo"
-          class:pub-header-logo--hidden={searchExpanded && !writingMode && !articleMode}
+          class:pub-header-logo--hidden={searchExpanded && !articleMode && !writingMode}
           aria-hidden={searchExpanded && !writingMode && !articleMode}
         >
           Tractatus
         </div>
       </div>
 
-      {#if !writingMode && !articleMode}
-        <div class="pub-header-search-slot" class:pub-header-search-slot--open={searchExpanded}>
-          <input
-            bind:this={searchInputEl}
-            type="search"
-            class="pub-header-search-input"
-            placeholder="Search essays"
-            value={feedSearchQuery}
-            oninput={(e) => onFeedSearchInput(e.currentTarget.value)}
-            onkeydown={onSearchKeydown}
-            aria-label="Search all public essays"
-            tabindex={searchExpanded ? 0 : -1}
-          />
-        </div>
-      {/if}
+      <div
+        class="pub-header-search-slot"
+        class:pub-header-search-slot--open={searchExpanded}
+        class:pub-header-search-slot--hidden={articleMode}
+        aria-hidden={articleMode || undefined}
+        inert={articleMode || undefined}
+      >
+        <input
+          bind:this={searchInputEl}
+          type="search"
+          class="pub-header-search-input"
+          placeholder={viewMode === 'library' ? 'Filter essays…' : 'Search essays'}
+          value={searchQuery}
+          oninput={(e) => onSearchInput(e.currentTarget.value)}
+          onkeydown={onSearchKeydown}
+          aria-label={viewMode === 'library' ? 'Filter your essays' : 'Search all public essays'}
+          tabindex={searchExpanded ? 0 : -1}
+        />
+      </div>
 
       <div class="pub-header-actions">
-        {#if !writingMode && !articleMode}
-          <button
-            type="button"
-            class="pub-header-icon-btn pub-header-icon-btn--plain"
-            onclick={() => void toggleSearch()}
-            aria-label={searchExpanded ? 'Close search' : 'Search essays'}
-            aria-expanded={searchExpanded}
-          >
+        <button
+          type="button"
+          class="pub-header-icon-btn pub-header-icon-btn--plain"
+          class:pub-header-icon-btn--hidden={articleMode || writingMode}
+          onclick={() => void toggleSearch()}
+          aria-label={searchExpanded ? 'Close search' : 'Search essays'}
+          aria-expanded={searchExpanded}
+          tabindex={articleMode || writingMode ? -1 : undefined}
+          inert={articleMode || writingMode || undefined}
+        >
+          <span class="pub-header-search-icon" class:pub-header-search-icon--open={searchExpanded}>
             {#if searchExpanded}
               <X class="size-5" aria-hidden="true" />
             {:else}
               <Search class="size-5" aria-hidden="true" />
             {/if}
+          </span>
+        </button>
+        {#if writingMode}
+          <button
+            type="button"
+            class="pub-header-publish-btn"
+            onclick={handlePublish}
+            disabled={isSaving}
+          >
+            <BookOpen class="size-3" aria-hidden="true" />
+            {mainActionLabel}
           </button>
         {/if}
-        {#if articleMode || !writingMode}
-          {#if currentUser}
-            <button
-              type="button"
-              class="pub-header-icon-btn pub-header-avatar"
-              onclick={openSettingsPanel}
-              aria-label="Account and settings"
-            >
-              {#key avatarSeed}
-                <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} size={28} rounded={0} />
-              {/key}
-            </button>
-          {:else}
-            <button
-              type="button"
-              class="pub-header-icon-btn pub-header-guest-btn"
-              onclick={openAuthPanel}
-              aria-label="Sign in or sign up"
-            >
-              <User class="size-3.5" aria-hidden="true" />
-            </button>
-          {/if}
+        {#if currentUser}
+          <button
+            type="button"
+            class="pub-header-icon-btn pub-header-avatar"
+            onclick={openSettingsPanel}
+            aria-label="Account and settings"
+          >
+            {#key avatarSeed}
+              <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} size={28} rounded={0} />
+            {/key}
+          </button>
+        {:else}
+          <button
+            type="button"
+            class="pub-header-icon-btn pub-header-guest-btn"
+            onclick={openAuthPanel}
+            aria-label="Sign in or sign up"
+          >
+            <User class="size-3.5" aria-hidden="true" />
+          </button>
         {/if}
       </div>
     </header>
 
-    {#if articleMode}
+    {#if articleMode || writingMode}
       <div class="pub-header-sub">
         <button
           type="button"
           class="pub-header-back-btn"
           onclick={handleHeaderBack}
+          disabled={writingMode && isSaving}
           aria-label="Back to feed"
         >
           <ArrowLeft class="size-3.5" aria-hidden="true" />
           Back
         </button>
+        {#if writingMode}
+          <div class="pub-header-meta">
+            <div class="pub-header-meta-status">
+              <span class="pub-header-meta-dot" class:pub-header-meta-dot--active={isSaving}></span>
+              <span>
+                {#if isSaving}
+                  Saving…
+                {:else if lastSavedAt}
+                  Saved {Math.max(0, Math.floor((Date.now() - lastSavedAt) / 1000))}s ago
+                {:else}
+                  Draft
+                {/if}
+              </span>
+            </div>
+            <span class="pub-header-meta-wordcount">{editorWordCount} words · {fmtReadTime(editorReadMins)}</span>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
 {/snippet}
 
 {#snippet feedCard(essay: Essay, featured = false)}
-  <button
-    type="button"
+  <div
     class="pub-feed-card"
     class:pub-feed-card--featured={featured}
     onclick={() => void openArticle(essay)}
+    role="button"
+    tabindex="0"
+    onkeydown={(e) => { if (e.key === 'Enter') void openArticle(essay); }}
   >
-    <span
-      class="pub-feed-card-title"
-      class:pub-feed-card-title--featured={featured}
-    >
-      {essay.title || 'Untitled'}
-    </span>
-    {#if getExcerpt(essay.content, featured ? FEED_EXCERPT_FEATURED : FEED_EXCERPT_ITEM)}
-      <span
-        class="pub-feed-card-excerpt"
-        class:pub-feed-card-excerpt--featured={featured}
-      >
-        {getExcerpt(essay.content, featured ? FEED_EXCERPT_FEATURED : FEED_EXCERPT_ITEM)}
+    <div class="pub-feed-card-meta">
+      <span class="pub-feed-card-meta-left">
+        {#key essay.author_avatar_seed}
+          <span class="pub-feed-card-avatar">
+            <GeneratedAvatar
+              userId={essay.user_id}
+              seed={essay.author_avatar_seed}
+              size={featured ? 24 : 20}
+              rounded={0}
+            />
+          </span>
+        {/key}
+        <span class="pub-feed-card-byline">
+          {essay.author_username || 'Anonymous'}
+        </span>
+        <span class="pub-feed-card-sep" aria-hidden="true">·</span>
+        <span class="pub-feed-card-date">{formatFeedDate(essay.published_at || essay.updated_at)}</span>
       </span>
-    {/if}
-  </button>
-{/snippet}
-
-{#snippet feedAuthorRow(essay: Essay)}
-  <div class="pub-author">
-    {#key essay.author_avatar_seed}
-      <div class="pub-author-avatar">
-        <GeneratedAvatar
-          userId={essay.user_id}
-          seed={essay.author_avatar_seed}
-          size={22}
-          rounded={0}
-        />
-      </div>
-    {/key}
-    <span class="pub-author-meta">
-      {essay.author_username || 'Anonymous'} &nbsp;·&nbsp;
-      {estimateReadTimeMinutes(essay.content)} min &nbsp;·&nbsp;
-      {formatFeedDate(essay.published_at || essay.updated_at)}
-    </span>
+      <span class="pub-feed-card-meta-right">
+        <span class="pub-feed-card-readtime">{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
+      </span>
+    </div>
+    <div class="pub-feed-card-body">
+      <span
+        class="pub-feed-card-title"
+        class:pub-feed-card-title--featured={featured}
+      >
+        {essay.title || 'Untitled'}
+      </span>
+      {#if renderExcerpt(essay.content, FEED_EXCERPT_FEATURED)}
+        <div
+          class="pub-feed-card-excerpt markdown-content"
+          class:pub-feed-card-excerpt--featured={featured}
+        >
+          {@html renderExcerpt(essay.content, FEED_EXCERPT_FEATURED)}
+        </div>
+      {/if}
+    </div>
   </div>
 {/snippet}
-
 {#snippet writingsChip(ghost = false, reveal = false)}
   <div
     class="mt-1 mb-2"
@@ -2111,119 +2231,50 @@
     {@render compactHeader(isWriting, !!readingEssay)}
 
     <div class="pub-body flex flex-col flex-1 min-h-0 overflow-hidden">
+  <div class="mode-panel">
   {#if currentUser && isWriting}
     <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <div class="editor-wrap flex-1 min-h-0 flex flex-col mx-3 mb-2 overflow-hidden">
-        <!-- Title -->
-        <input
-          type="text"
-          class="editor-title-input"
-          placeholder="Title"
-          bind:value={editorTitle}
-          oninput={() => { saveError = null; generateSlugFromTitle(); scheduleAutoSave(); }}
-          onblur={() => { generateSlugFromTitle(true); }}
-          use:focusEditorTitle
-          disabled={isSaving}
+      <div class="editor-wrap flex-1 min-h-0 flex flex-col mx-3 overflow-hidden">
+        <RichEditor
+          markdown={editorContent}
+          onContentChange={(md) => { editorContent = md; saveError = null; scheduleAutoSave(); }}
+          placeholder="Start writing…"
+          title={editorTitle}
+          onTitleInput={(e: Event) => {
+            const raw = (e.currentTarget as HTMLInputElement).value;
+            const sanitized = raw.replace(/[^\p{L}\p{N}\s-]/gu, '');
+            if (sanitized === editorTitle) return;
+            editorTitle = sanitized;
+            saveError = null;
+            generateSlugFromTitle();
+            scheduleAutoSave();
+          }}
+          onTitleBlur={() => { generateSlugFromTitle(true); }}
+          titleDisabled={isSaving}
+          autoFocusTitle={true}
         />
+      </div>
 
-        <!-- Slug row -->
-        <div class="editor-slug-row">
-          <span class="shrink-0">slug /</span>
-          <input
-            type="text"
-            class="editor-slug-input"
-            bind:value={editorSlug}
-            oninput={() => { saveError = null; scheduleAutoSave(); }}
-            placeholder="auto-from-title"
-            disabled={isSaving}
-          />
+      {#if currentEssayId}
+        <div class="editor-action-bar mx-3">
           <button
             type="button"
-            class="editor-regen-btn"
-            onclick={() => generateSlugFromTitle(true)}
+            title="Hold to delete essay"
+            class="editor-action-btn {deleteHoldProgress > 0 ? 'editor-action-btn--danger-hold' : 'editor-action-btn--danger'}"
+            onmousedown={startDeleteHold}
+            onmouseup={stopDeleteHold}
+            onmouseleave={stopDeleteHold}
+            ontouchstart={startDeleteHold}
+            ontouchend={stopDeleteHold}
             disabled={isSaving}
-          >REGEN</button>
+          >
+            <div class="settings-panel-action-btn__fill settings-panel-action-btn__fill--delete" style="width: {deleteHoldProgress}%;"></div>
+            <span class="settings-panel-action-btn__label">
+              <Trash2 class="size-3.5 shrink-0 pointer-events-none" aria-hidden="true" />
+            </span>
+          </button>
         </div>
-
-        <!-- Toolbar -->
-        <div class="editor-toolbar">
-          <!-- Headings -->
-          <button type="button" class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(1)} title="H1" disabled={isSaving}>H1</button>
-          <button type="button" class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(2)} title="H2" disabled={isSaving}>H2</button>
-          <button type="button" class="editor-tool-btn--wide editor-tool-btn" onclick={() => insertHeading(3)} title="H3" disabled={isSaving}>H3</button>
-
-          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
-
-          <button type="button" class="editor-tool-btn" onclick={() => wrapSelection('**','**')} title="Bold" disabled={isSaving}><Bold class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={() => wrapSelection('*','*')} title="Italic" disabled={isSaving}><Italic class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={() => wrapSelection('~~','~~')} title="Strike" disabled={isSaving}><Strikethrough class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={applyHighlight} title="Highlight" disabled={isSaving}><Highlighter class="size-3.5" /></button>
-
-          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
-
-          <button type="button" class="editor-tool-btn" onclick={applySup} title="Superscript" disabled={isSaving}><Superscript class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={applySub} title="Subscript" disabled={isSaving}><Subscript class="size-3.5" /></button>
-
-          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
-
-          <button type="button" class="editor-tool-btn" onclick={insertLink} title="Link" disabled={isSaving}><Link class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={insertImageLink} title="Image link (URL only)" disabled={isSaving}><Image class="size-3.5" /></button>
-
-          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
-
-          <button type="button" class="editor-tool-btn" onclick={insertInlineCode} title="Inline code" disabled={isSaving}><Code class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={insertCodeBlock} title="Code block" disabled={isSaving}><Code2 class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={insertDivider} title="Divider" disabled={isSaving}><Minus class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={insertQuote} title="Quote / poetry" disabled={isSaving}><Quote class="size-3.5" /></button>
-
-          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
-
-          <button type="button" class="editor-tool-btn" onclick={() => wrapLatex(true)} title="Inline LaTeX $" disabled={isSaving}><Sigma class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn--wide editor-tool-btn" onclick={() => wrapLatex(false)} title="Block LaTeX $$" disabled={isSaving}>$$</button>
-
-          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
-
-          <button type="button" class="editor-tool-btn" onclick={() => applyAlign('left')} title="Align left" disabled={isSaving}><AlignLeft class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={() => applyAlign('center')} title="Align center" disabled={isSaving}><AlignCenter class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={() => applyAlign('right')} title="Align right" disabled={isSaving}><AlignRight class="size-3.5" /></button>
-
-          <div class="w-px h-5 bg-[color:var(--border)] mx-1"></div>
-
-          <button type="button" class="editor-tool-btn" onclick={insertFootnote} title="Footnote" disabled={isSaving}>[^]</button>
-
-          <div class="flex-1"></div>
-
-          <!-- Undo / Redo -->
-          <button type="button" class="editor-tool-btn" onclick={undo} disabled={isSaving || undoStack.length === 0} title="Undo (Ctrl/Cmd+Z)"><Undo2 class="size-3.5" /></button>
-          <button type="button" class="editor-tool-btn" onclick={redo} disabled={isSaving || redoStack.length === 0} title="Redo (Ctrl/Cmd+Shift+Z)"><Redo2 class="size-3.5" /></button>
-        </div>
-
-        <!-- The actual live markdown source editor (like obsidian source mode + substack flow) -->
-        <textarea
-          bind:this={textareaEl}
-          class="editor-textarea no-scrollbar"
-          placeholder="Start writing... Use the toolbar or type Markdown directly.&#10;&#10;# Heading&#10;**bold** *italic* ~~strike~~ ==highlight==&#10;> quote / poetry&#10;`code`&#10;```&#10;block&#10;```&#10;---&#10;$E=mc^2$&#10;[^1] footnote marker"
-          bind:value={editorContent}
-          onkeydown={onEditorKeydown}
-          oninput={onEditorInput}
-          disabled={isSaving}
-        ></textarea>
-
-        <div class="editor-meta-bar">
-          <div class="editor-status">
-            {#if isSaving}
-              Saving…
-            {:else if lastSavedAt}
-              Saved {Math.max(0, Math.floor((Date.now() - lastSavedAt) / 1000))}s ago
-            {:else}
-              Draft
-            {/if}
-          </div>
-          <div>
-            {editorReadMins} min read
-          </div>
-        </div>
-      </div>
+      {/if}
     </div>
   {:else}
     {#if !readingEssay && !readingEssayLoading}
@@ -2250,35 +2301,71 @@
     {/if}
 
   {#if currentUser && viewMode === 'library'}
-    <div class="pub-scroll flex-1 min-h-0 overflow-y-auto no-scrollbar">
+    <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
       {#if essaysLoading && !essaysLoadedOnce}
         <div class="pub-empty">Loading your writings…</div>
-      {:else if libraryEssays.length === 0}
+      {:else if filteredLibraryEssays.length === 0}
         <div class="pub-empty">
-          <div class="pub-empty-title">No writings yet.</div>
-          <div class="pub-empty-hint">Tap the write button to start your first essay.</div>
+          {#if librarySearchQuery}
+            <div class="pub-empty-title">No essays match "{librarySearchQuery.trim()}".</div>
+          {:else}
+            <div class="pub-empty-title">No writings yet.</div>
+            <div class="pub-empty-hint">Tap the write button to start your first essay.</div>
+          {/if}
         </div>
-      {:else}
-        {#each libraryEssays as essay (essay.id)}
-          <button type="button" class="pub-library-item" onclick={() => openEditorForEssay(essay)}>
-            <div class="pub-library-item-top">
-              <span
-                class="pub-status-chip"
-                class:pub-status-chip--public={essay.is_public}
-              >
-                {essay.is_public ? 'Public' : 'Private'}
-              </span>
-              <span class="pub-library-item-meta">
-                {estimateReadTimeMinutes(essay.content)} min &nbsp;·&nbsp; {formatFeedDate(essay.updated_at)}
-              </span>
-            </div>
-            <div class="pub-library-item-title">{essay.title || 'Untitled'}</div>
-          </button>
-        {/each}
-      {/if}
+        {:else}
+          <div class="library-cards">
+            {#each filteredLibraryEssays as essay (essay.id)}
+              {@const excerpt = libraryExcerpts.get(essay.id)}
+              <div class="library-card" class:library-card--public={essay.is_public}>
+                <button
+                  type="button"
+                  class="library-card-body"
+                  onclick={() => openEditorForEssay(essay)}
+                >
+                  <div class="library-card-top">
+                    <div class="library-card-title">{essay.title || 'Untitled'}</div>
+                    <span class="library-card-badge" class:library-card-badge--public={essay.is_public}>
+                      {essay.is_public ? 'Public' : 'Draft'}
+                    </span>
+                  </div>
+                  {#if excerpt}
+                    <div class="library-card-excerpt">{@html excerpt}</div>
+                  {/if}
+                  <div class="library-card-footer">
+                    <span>{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
+                    <span class="library-card-dot" aria-hidden="true">·</span>
+                    <span>{formatFeedDate(essay.updated_at)}</span>
+                    {#if essay.is_public && essay.published_at}
+                      <span class="library-card-dot" aria-hidden="true">·</span>
+                      <span>Published {formatFeedDate(essay.published_at)}</span>
+                    {/if}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  class="library-card-delete"
+                  class:library-card-delete--hold={libraryDeleteTargetId === essay.id && libraryDeleteProgress > 0}
+                  aria-label="Delete essay"
+                  title="Hold to delete"
+                  onmousedown={() => startLibraryDeleteHold(essay.id)}
+                  onmouseup={stopLibraryDeleteHold}
+                  onmouseleave={stopLibraryDeleteHold}
+                  ontouchstart={() => startLibraryDeleteHold(essay.id)}
+                  ontouchend={stopLibraryDeleteHold}
+                >
+                  {#if libraryDeleteTargetId === essay.id && libraryDeleteProgress > 0}
+                    <div class="library-card-delete-fill" style="width: {libraryDeleteProgress}%;"></div>
+                  {/if}
+                  <Trash2 class="size-3" aria-hidden="true" />
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
     </div>
   {:else}
-    <div class="pub-scroll flex-1 min-h-0 overflow-y-auto no-scrollbar">
+    <div class="pub-scroll no-scrollbar" in:fly={{ x: -6, duration: 160, opacity: 1 }}>
       {#if readingEssayLoading}
         <div class="pub-empty">Loading article…</div>
       {:else if readingEssayError}
@@ -2303,7 +2390,7 @@
             <span class="pub-author-meta">
               {readingEssay.author_username || 'Anonymous'} &nbsp;·&nbsp;
               {new Date(readingEssay.published_at || readingEssay.updated_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} &nbsp;·&nbsp;
-              {estimateReadTimeMinutes(readingEssay.content)} min
+              {countWords(readingEssay.content)} words · {fmtReadTime(estimateReadTimeMinutes(readingEssay.content))}
             </span>
           </div>
           <div class="pub-article-prose reader-prose markdown-content">
@@ -2314,14 +2401,17 @@
         {#if searchLoading}
           <div class="pub-empty">Searching…</div>
         {:else if searchResults.length === 0}
-          <div class="pub-empty">
-            <div class="pub-empty-title">No essays match "{feedSearchQuery.trim()}".</div>
+          <div class="pub-empty pub-empty--search">
+            <div class="pub-empty-title">No essays match "{searchQuery.trim()}".</div>
             <div class="pub-empty-hint">Try a different title, author, or phrase.</div>
           </div>
         {:else}
           {#each searchResults as item, i (item.id)}
-            <article class="pub-feed-item" class:pub-feed-item--last={i === searchResults.length - 1}>
-              {@render feedAuthorRow(item)}
+            <article
+              class="pub-feed-item pub-feed-search-item"
+              class:pub-feed-item--last={i === searchResults.length - 1}
+              style="animation-delay: {Math.min(i * 30, 200)}ms"
+            >
               {@render feedCard(item)}
             </article>
           {/each}
@@ -2337,14 +2427,11 @@
         {@const featured = publicFeed[0]}
         {@const rest = publicFeed.slice(1)}
         <article class="pub-featured">
-          <div class="pub-tag">Latest</div>
-          {@render feedAuthorRow(featured)}
           {@render feedCard(featured, true)}
         </article>
 
         {#each rest as item, i}
           <article class="pub-feed-item" class:pub-feed-item--last={i === rest.length - 1}>
-            {@render feedAuthorRow(item)}
             {@render feedCard(item)}
           </article>
         {/each}
@@ -2353,6 +2440,7 @@
   {/if}
   {/if}
     </div>
+  </div>
 
     {#if !isWriting && !readingEssay && !readingEssayLoading}
       <button
@@ -2361,7 +2449,7 @@
         onclick={handleWriteFabClick}
         aria-label={currentUser ? 'Write new essay' : 'Sign in to write'}
       >
-        <Plus class="size-5" aria-hidden="true" />
+        <Plus class="size-6" aria-hidden="true" />
       </button>
     {/if}
   </div>

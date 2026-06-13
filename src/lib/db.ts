@@ -420,6 +420,11 @@ export interface Essay {
 	updated_at: string;
 }
 
+export interface EssayWithAuthor extends Essay {
+	author_username: string;
+	author_avatar_seed: string | null;
+}
+
 export function slugifyTitle(title: string): string {
 	const base = (title || 'untitled')
 		.toLowerCase()
@@ -705,7 +710,9 @@ export const db = {
 			if ((error as any).code === 'PGRST116') return null;
 			throw error;
 		}
-		return data as Essay;
+		const essay = data as Essay;
+		await attachAuthors([essay]);
+		return essay;
 	},
 
 	async getEssayForEdit(id: string): Promise<Essay | null> {
@@ -735,23 +742,6 @@ export const db = {
 
 		if (params.is_public) {
 			payload.published_at = payload.published_at || now;
-		}
-
-		// Denormalize author info for public feed display (like Substack)
-		try {
-			const { data: author } = await supabase
-				.from('usernames')
-				.select('username, avatar_seed')
-				.eq('user_id', uid)
-				.single();
-			if (author) {
-				payload.author_username = author.username;
-				payload.author_avatar_seed = author.avatar_seed;
-			}
-		} catch (e) {
-			// non-fatal; fall back to username from auth metadata if possible
-			const fallback = (user?.user_metadata?.username as string) || undefined;
-			if (fallback) payload.author_username = fallback;
 		}
 
 		if (params.id) {
@@ -801,13 +791,15 @@ export const db = {
 			.from('essays')
 			.select('*')
 			.eq('is_public', true)
-			.or(`title.ilike.${pattern},content.ilike.${pattern},author_username.ilike.${pattern}`)
+			.or(`title.ilike.${pattern},content.ilike.${pattern}`)
 			.order('published_at', { ascending: false, nullsFirst: false })
 			.order('updated_at', { ascending: false })
 			.limit(limit);
 
 		if (error) throw error;
-		return (data ?? []) as Essay[];
+		const essays = (data ?? []) as Essay[];
+		await attachAuthors(essays);
+		return essays;
 	},
 
 	/** Public feed: all published essays, newest first (includes the current user). */
@@ -820,9 +812,29 @@ export const db = {
 			.order('updated_at', { ascending: false });
 
 		if (error) throw error;
-		return (data ?? []) as Essay[];
+		const essays = (data ?? []) as Essay[];
+		await attachAuthors(essays);
+		return essays;
 	},
 };
+
+async function attachAuthors(essays: Essay[]): Promise<void> {
+	const ids = [...new Set(essays.map((e) => e.user_id).filter(Boolean))];
+	if (!ids.length) return;
+	const { data: authors } = await supabase
+		.from('usernames')
+		.select('user_id, username, avatar_seed')
+		.in('user_id', ids);
+	if (!authors) return;
+	const map = new Map(authors.map((a) => [a.user_id, a]));
+	for (const e of essays) {
+		const a = map.get(e.user_id);
+		if (a) {
+			(e as unknown as Record<string, unknown>).author_username = a.username;
+			(e as unknown as Record<string, unknown>).author_avatar_seed = a.avatar_seed;
+		}
+	}
+}
 
 // Basic type for future blog use
 export interface UserProfile {
