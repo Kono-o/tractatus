@@ -7,6 +7,7 @@ import { isNativeApp } from './native';
 export interface GitHubReleaseAsset {
 	name: string;
 	browser_download_url: string;
+	url: string;
 	size: number;
 	content_type: string;
 }
@@ -255,8 +256,8 @@ export async function downloadApkToCache(
 
 	const contentLength = Number(res.headers.get('Content-Length') || info.size || 0);
 	let received = 0;
-	const chunks: BlobPart[] = [];
-	const reader = res.body.getReader();
+	const chunks: Uint8Array[] = [];
+	const reader = res.body!.getReader();
 
 	while (true) {
 		const { done, value } = await reader.read();
@@ -309,9 +310,8 @@ export async function downloadApkToCache(
 		const header = await Filesystem.readFile({
 			path: relativePath,
 			directory: Directory.Cache,
-			encoding: 'base64',
 		});
-		const firstBytes = atob(header.data).slice(0, 4);
+		const firstBytes = atob(header.data as string).slice(0, 4);
 		if (!firstBytes.startsWith('PK')) {
 			try {
 				await Filesystem.deleteFile({ path: relativePath, directory: Directory.Cache });

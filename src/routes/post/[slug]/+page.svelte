@@ -4,6 +4,7 @@
   import { db, type Essay } from '$lib/db';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
+  import hljs from 'highlight.js';
 
   let slug = $derived($page.params.slug);
 
@@ -17,11 +18,11 @@
     let out = md;
 
     // ==highlight==
-    out = out.replace(/==(.+?)==/g, '<mark>$1</mark>');
+    out = out.replace(/(?<!=)==(.+?)==(?!=)/g, '<mark>$1</mark>');
 
     // ^sup^ and ~sub~ (non-greedy, avoid breaking urls etc)
     out = out.replace(/\^(.+?)\^/g, '<sup>$1</sup>');
-    out = out.replace(/~(.+?)~/g, '<sub>$1</sub>');
+    out = out.replace(/(?<!~)~(.+?)~(?!~)/g, '<sub>$1</sub>');
 
     // ::: align blocks (center / left / right) — very light custom
     out = out.replace(/::: (center|left|right)\s*([\s\S]*?):::/g, (_m, align, inner) => {
@@ -42,7 +43,19 @@
     // Use GFM + breaks for nice writing feel
     const raw = marked.parse(pre, { breaks: true, gfm: true }) as string;
 
-    return DOMPurify.sanitize(raw, {
+    // Apply syntax highlighting to code blocks with auto language detection
+    const highlighted = raw.replace(/<pre><code(\s+class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g, (_m, cls, code) => {
+      const decoded = code
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+      const result = hljs.highlightAuto(decoded);
+      return `<pre><code class="hljs language-${result.language}">${result.value}</code></pre>`;
+    });
+
+    return DOMPurify.sanitize(highlighted, {
       ALLOWED_TAGS: [
         'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'del',
         'ul', 'ol', 'li',
@@ -50,9 +63,10 @@
         'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'blockquote', 'hr',
         'mark', 'sup', 'sub', 'div', 'span',
-        'table', 'thead', 'tbody', 'tr', 'th', 'td'
+        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'img',
       ],
-      ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class'],
+      ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class', 'src', 'alt'],
     });
   }
 

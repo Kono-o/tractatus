@@ -198,9 +198,14 @@ create trigger on_auth_user_username
 -- 4. RLS policies (idempotent)
 -- ============================================
 drop policy if exists "usernames_select_own" on public.usernames;
-create policy "usernames_select_own" on public.usernames
+drop policy if exists "usernames_select_anon" on public.usernames;
+drop policy if exists "usernames_select_auth" on public.usernames;
+create policy "usernames_select_anon" on public.usernames
+  for select to anon
+  using (true);
+create policy "usernames_select_auth" on public.usernames
   for select to authenticated
-  using (user_id = (select auth.uid()));
+  using (true);
 
 -- Allow anon to check availability via the security definer function (no direct table access needed)
 grant select on public.usernames to anon;
@@ -259,8 +264,6 @@ create table if not exists public.essays (
   content text not null default '',
   is_public boolean not null default false,
   published_at timestamptz,
-  author_username text,
-  author_avatar_seed text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint essays_slug_format check (slug ~ '^[a-z0-9-]{1,120}$'),
