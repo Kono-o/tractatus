@@ -7,7 +7,7 @@
 
 set -l root (builtin realpath (dirname (status filename))/..)
 set -l signing_dir "$root/scripts/android-signing"
-set -l keystore "$signing_dir/lift-tracker-release.keystore"
+set -l keystore "$signing_dir/tractatus-release.keystore"
 set -l props "$signing_dir/keystore.properties"
 
 mkdir -p $signing_dir
@@ -33,9 +33,12 @@ end
 # Use a fixed, stable password for the development/sideload signing key.
 # This ensures the generated keystore + properties are always in sync
 # (the random password approach was causing "password incorrect" errors on this system).
+# NOTE: The actual password bytes are kept stable across renames so that any
+# --force regeneration produces a keystore compatible with the previous one
+# (important for sideloading update continuity on the same appId).
 set -l store_pass "LT-Tracker-StableReleaseKey-v3-2026-!DoNotLose"
 set -l key_pass $store_pass
-set -l alias lift-tracker
+set -l alias tractatus-release
 
 keytool -genkeypair -v \
     -keystore $keystore \
@@ -45,10 +48,10 @@ keytool -genkeypair -v \
     -validity 10000 \
     -storepass $store_pass \
     -keypass $key_pass \
-    -dname "CN=Lift Tracker, OU=Mobile, O=Lift Tracker, L=Unknown, ST=Unknown, C=XX"
+    -dname "CN=Tractatus, OU=Mobile, O=Tractatus, L=Unknown, ST=Unknown, C=XX"
 
 printf '%s\n' \
-    "storeFile=lift-tracker-release.keystore" \
+    "storeFile=tractatus-release.keystore" \
     "storePassword=$store_pass" \
     "keyAlias=$alias" \
     "keyPassword=$key_pass" \

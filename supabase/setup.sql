@@ -206,7 +206,44 @@ create policy "usernames_select_own" on public.usernames
 grant select on public.usernames to anon;
 
 -- ============================================
--- 5. Optional: Basic comment
+-- 5. Data usage snapshot (account menu chips)
 -- ============================================
-comment on table public.usernames is 'Username + password + identicon auth system (migrated from Lift Tracker style).';
+create or replace function public.get_own_data_usage()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  profile_count int := 0;
+begin
+  if uid is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  select count(*)::int into profile_count
+  from public.usernames
+  where user_id = uid;
+
+  return jsonb_build_object(
+    'templates', profile_count,
+    'exercises', 0,
+    'schedule', 0,
+    'workout_history', 0,
+    'tracked_stats', 0,
+    'stat_logs', 0,
+    'estimated_bytes', greatest(profile_count, 0) * 250,
+    'exact', true
+  );
+end;
+$$;
+
+revoke all on function public.get_own_data_usage() from public;
+grant execute on function public.get_own_data_usage() to authenticated;
+
+-- ============================================
+-- 6. Optional: Basic comment
+-- ============================================
+comment on table public.usernames is 'Username + password + identicon auth system.';
 

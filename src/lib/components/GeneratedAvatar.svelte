@@ -1,15 +1,16 @@
 <script lang="ts">
-  let { userId, size = 32, className = '', rounded = 8, seed } = $props<{
-    userId: string;
+  let { userId = '', size = 32, className = '', rounded = 8, seed } = $props<{
+    userId?: string;
     size?: number;
     className?: string;
     rounded?: number;
-    seed?: string; // temporary: influences identicon along with userId
+    seed?: string | null; // influences identicon; falls back gracefully for SSR / logged-out state
   }>();
 
   const borderRadius = $derived(`${(rounded / 100) * size}px`);
 
   function hashCode(str: string): number {
+    if (typeof str !== 'string' || str.length === 0) return 0;
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
@@ -19,7 +20,7 @@
     return Math.abs(hash);
   }
 
-  const effectiveId = $derived(seed ? `${userId}:${seed}` : userId);
+  const effectiveId = $derived(seed || userId || 'default');
   const hash = $derived(hashCode(effectiveId));
 
   const GRID_SIZE = 5;

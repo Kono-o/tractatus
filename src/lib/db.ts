@@ -3,7 +3,6 @@ import {
 	PUBLIC_SUPABASE_URL,
 	PUBLIC_SUPABASE_ANON_KEY,
 } from "$env/static/public";
-import { getNativeOAuthRedirectUrl, isNativeApp } from "./native";
 
 export const supabase = createClient(
 	PUBLIC_SUPABASE_URL,
@@ -20,7 +19,14 @@ export const supabase = createClient(
 
 function getOAuthRedirectUrl(): string {
 	if (typeof window === "undefined") return "";
-	if (isNativeApp()) return getNativeOAuthRedirectUrl();
+	// Native deep link (com.tractatus.app://...) is only used inside the Capacitor
+	// Android app (which uses the static adapter → no SSR). For web / SSR we always
+	// return the origin callback. This avoids any top-level import of @capacitor/core
+	// in db.ts so that core auth never pulls native modules during server rendering.
+	const cap = (window as any).Capacitor;
+	if (cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform()) {
+		return 'com.tractatus.app://auth/callback';
+	}
 	return `${window.location.origin}/auth/callback`;
 }
 
@@ -389,7 +395,7 @@ function clearAuthRedirectParams(): void {
 }
 
 // ============================================================
-// DB LAYER - AUTH FOCUSED (migrated from Lift Tracker)
+// DB LAYER - AUTH FOCUSED (username + password + identicon)
 // ============================================================
 
 export const db = {

@@ -3,7 +3,12 @@ import { Capacitor } from '@capacitor/core';
 export const NATIVE_APP_ID = 'com.tractatus.app';
 
 export function isNativeApp(): boolean {
-	return Capacitor.isNativePlatform();
+	if (typeof window === 'undefined') return false;
+	try {
+		return Capacitor.isNativePlatform();
+	} catch {
+		return false;
+	}
 }
 
 /** OAuth redirect registered in Supabase for the native shell (custom URL scheme). */
@@ -35,9 +40,9 @@ export async function initNativeShell(): Promise<void> {
 	nativeShellReady = true;
 
 	const [{ App }, { StatusBar, Style }, { Keyboard }] = await Promise.all([
-		import('@capacitor/app'),
-		import('@capacitor/status-bar'),
-		import('@capacitor/keyboard'),
+		import(/* @vite-ignore */ '@capacitor/app'),
+		import(/* @vite-ignore */ '@capacitor/status-bar'),
+		import(/* @vite-ignore */ '@capacitor/keyboard'),
 	]);
 
 	try {

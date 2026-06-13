@@ -9,11 +9,18 @@ node_modules
 build
 dist
 
-# Capacitor (generated native projects)
-android
-ios
+# Capacitor platforms
+# We commit android/ and ios/ (custom plugins like UpdaterPlugin.java live here).
+# Only ignore build artifacts, Gradle caches, and generated public web assets.
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/
+ios/App/build/
+ios/App/Pods/
+ios/App/App/public/
 
-# Generated assets (from icon generation)
+# Generated assets (from icon generation scripts)
 assets/
 
 # Android signing keys (never commit!)

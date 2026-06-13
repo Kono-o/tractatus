@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Tractatus</string>
+    <string name="title_activity_main">Tractatus</string>
+    <string name="package_name">com.tractatus.app</string>
+    <string name="custom_url_scheme">com.tractatus.app</string>
+</resources>
