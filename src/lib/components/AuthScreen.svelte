@@ -13,6 +13,7 @@
   import AuthBrandIcon from '$lib/components/auth-brand-icons.svelte';
   import {
     db,
+    isSupabaseConfigured,
     formatAuthError,
     MAX_PASSWORD_LEN,
     MAX_USERNAME_LEN,
@@ -205,6 +206,13 @@
     <div class="text-6xl font-bold tracking-[8px] text-white">TRACTATUS</div>
     <div class="text-[10px] tracking-[2px] text-emerald-400/70 mt-1">v{APP_VERSION}</div>
   </div>
+
+  {#if !isSupabaseConfigured}
+    <p class="max-w-sm text-[10px] leading-snug text-amber-400/90 border border-amber-900/50 bg-amber-950/30 rounded-lg px-3 py-2">
+      Supabase is not configured. Set <code class="text-amber-200/90">PUBLIC_SUPABASE_URL</code> and
+      <code class="text-amber-200/90">PUBLIC_SUPABASE_ANON_KEY</code> in Vercel, then redeploy.
+    </p>
+  {/if}
 
   <div class="auth-panel-card rounded-xl border border-[#1e1e1e] bg-[#141414] overflow-hidden">
     <div class="p-1 border-b border-[#1e1e1e] bg-[#111]">

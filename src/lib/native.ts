@@ -1,11 +1,11 @@
-import { Capacitor } from '@capacitor/core';
-
 export const NATIVE_APP_ID = 'com.tractatus.app';
 
 export function isNativeApp(): boolean {
 	if (typeof window === 'undefined') return false;
 	try {
-		return Capacitor.isNativePlatform();
+		const cap = (window as Window & { Capacitor?: { isNativePlatform?: () => boolean } })
+			.Capacitor;
+		return typeof cap?.isNativePlatform === 'function' && cap.isNativePlatform();
 	} catch {
 		return false;
 	}

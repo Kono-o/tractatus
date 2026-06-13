@@ -4,9 +4,17 @@ import {
 	PUBLIC_SUPABASE_ANON_KEY,
 } from "$env/static/public";
 
+const supabaseUrl = PUBLIC_SUPABASE_URL.trim();
+const supabaseAnonKey = PUBLIC_SUPABASE_ANON_KEY.trim();
+
+/** False when PUBLIC_* env vars were missing at build time (Vercel 500 without this guard). */
+export const isSupabaseConfigured =
+	supabaseUrl.length > 0 && supabaseAnonKey.length > 0;
+
+// createClient throws on empty url; placeholder keeps SSR alive until env is set on Vercel.
 export const supabase = createClient(
-	PUBLIC_SUPABASE_URL,
-	PUBLIC_SUPABASE_ANON_KEY,
+	isSupabaseConfigured ? supabaseUrl : "https://placeholder.supabase.co",
+	isSupabaseConfigured ? supabaseAnonKey : "placeholder-anon-key",
 	{
 		auth: {
 			flowType: "pkce",
