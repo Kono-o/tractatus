@@ -2532,7 +2532,7 @@
             </article>
           {/each}
         {/if}
-      {:else if publicFeedLoading}
+      {:else if publicFeedLoading && !feedRefreshing}
         <div class="pub-feed-loading">
           <svg class="pub-feed-spinner" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" />
