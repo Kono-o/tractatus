@@ -4,7 +4,7 @@
     size?: number;
     className?: string;
     rounded?: number;
-    seed?: string | null; // influences identicon; falls back gracefully for SSR / logged-out state
+    seed?: string | null;
   }>();
 
   const borderRadius = $derived(`${(rounded / 100) * size}px`);
@@ -20,21 +20,6 @@
     return Math.abs(hash);
   }
 
-  function paletteFromHash(h: number): { cubeColor: string; bgColor: string } {
-    const hue = h % 360;
-    const saturation = 72 + (h % 17);
-    const lightness = 48 + (h % 9);
-    const hueOffset = ((h >> 5) & 1) === 0 ? 14 : -14;
-    const bgHue = (hue + hueOffset + 360) % 360;
-    const bgSaturation = Math.max(18, saturation - 46);
-    const bgLightness = Math.min(88, lightness + 30);
-
-    return {
-      cubeColor: `hsl(${hue} ${saturation}% ${lightness}%)`,
-      bgColor: `hsl(${bgHue} ${bgSaturation}% ${bgLightness}%)`,
-    };
-  }
-
   const effectiveId = $derived(seed || userId || 'default');
   const hash = $derived(hashCode(effectiveId));
 
@@ -43,15 +28,30 @@
 
   const avatarData = $derived.by(() => {
     const h = hash;
-    const { cubeColor, bgColor } = paletteFromHash(h);
 
+    const hue = h % 360;
+    const sat = 28 + (h % 13);
+    const light = 72 + (h % 11);
+
+    // Background: lighter version
+    const bgLight = Math.min(96, light + 20);
+    const bgSat = Math.max(10, sat - 16);
+
+    const cellColor = `oklch(${(light + 3) / 100} ${(sat + 1) / 100} ${hue})`;
+    const bgColor = `oklch(${bgLight / 100} ${bgSat / 100} ${hue})`;
+
+    // Build symmetric 5x5 grid
     const g: boolean[][] = [];
     for (let y = 0; y < GRID_SIZE; y++) {
-      const row: boolean[] = [];
+      const row: number[] = [];
       for (let x = 0; x < Math.ceil(GRID_SIZE / 2); x++) {
         const bitPos = (y * 5 + x * 2) % 31;
         const on = ((h >> bitPos) & 1) === 1;
-        row.push(on);
+        if (!on) {
+          row.push(false);
+        } else {
+          row.push(true);
+        }
       }
       const mirrored = [...row];
       const start = GRID_SIZE % 2 === 0 ? row.length - 1 : row.length - 2;
@@ -61,6 +61,7 @@
       g.push(mirrored);
     }
 
+    // Flatten cells
     const cells: { x: number; y: number }[] = [];
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
@@ -68,7 +69,7 @@
       }
     }
 
-    return { cubeColor, bgColor, cells };
+    return { cellColor, bgColor, cells };
   });
 </script>
 
@@ -88,7 +89,7 @@
       y={cell.y * cellSize + 2}
       width={cellSize - 4}
       height={cellSize - 4}
-      fill={avatarData.cubeColor}
+      fill={avatarData.cellColor}
       rx="2"
     />
   {/each}

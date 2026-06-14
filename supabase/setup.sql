@@ -360,3 +360,19 @@ grant execute on function public.get_own_data_usage() to authenticated;
 
 comment on table public.essays is 'User essays/writings. Private drafts (is_public=false) or published (true). Slug is globally unique for nice URLs.';
 
+-- ============================================
+-- 6. Realtime (enable for live feed updates)
+-- ============================================
+do $$
+begin
+  alter publication supabase_realtime add table public.essays;
+exception when duplicate_object then null;
+end;
+$$;
+do $$
+begin
+  alter publication supabase_realtime add table public.usernames;
+exception when duplicate_object then null;
+end;
+$$;
+

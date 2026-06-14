@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { fly } from 'svelte/transition';
   import GeneratedAvatar from '$lib/components/GeneratedAvatar.svelte';
   import {
@@ -29,9 +29,13 @@
   import { APP_VERSION } from '$lib/version';
   import { isNativeApp } from '$lib/native';
   import type { User as SupabaseUser } from '@supabase/supabase-js';
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
-  import hljs from 'highlight.js';
+  import {
+    preprocessMarkdown,
+    renderEssay,
+    renderExcerpt,
+    renderChangelog,
+    handleCodeCopyClick,
+  } from '$lib/markdown';
   import confetti from 'canvas-confetti';
   import {
     loadSupabasePanelSnapshot,
@@ -67,16 +71,20 @@
     Superscript,
     Sigma,
     ArrowLeft,
+    ChevronRight,
     X,
-    BookOpen,
+
     Search,
     Plus,
     User,
+    Eye,
+    EyeClosed,
   } from '@lucide/svelte';
 
   const FEED_SEARCH_DEBOUNCE_MS = 280;
-  const FEED_EXCERPT_FEATURED = 400;
-  const FEED_EXCERPT_ITEM = 160;
+  const FEED_EXCERPT_FEATURED_LINES = 6;
+  const FEED_EXCERPT_ITEM_LINES = 3;
+  const LIBRARY_EXCERPT_LINES = 3;
 
   function formatFeedDate(iso: string): string {
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -105,48 +113,6 @@
   let readingEssay = $state<Essay | null>(null);
   let readingEssayLoading = $state(false);
   let readingEssayError = $state<string | null>(null);
-
-  function preprocessMarkdown(md: string): string {
-    if (!md) return '';
-    let out = md;
-    out = out.replace(/(?<!=)==(.+?)==(?!=)/g, '<mark>$1</mark>');
-    out = out.replace(/\^(.+?)\^/g, '<sup>$1</sup>');
-    out = out.replace(/(?<!~)~(?!~)(.+?)~(?!~)/g, '<sub>$1</sub>');
-    out = out.replace(/::: (center|left|right)\s*([\s\S]*?):::/g, (_m, align, inner) => {
-      return `<div style="text-align:${align}">${inner.trim()}</div>`;
-    });
-    return out;
-  }
-
-  function renderEssay(md: string): string {
-    if (!md) return '';
-    if (typeof window === 'undefined' || typeof DOMPurify === 'undefined') {
-      return md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-    }
-    const pre = preprocessMarkdown(md);
-    const raw = marked.parse(pre, { breaks: true, gfm: true }) as string;
-    const highlighted = raw.replace(/<pre><code(\s+class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g, (_m, cls, code) => {
-      const decoded = code
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-      const result = hljs.highlightAuto(decoded);
-      return `<pre><code class="hljs language-${result.language}">${result.value}</code></pre>`;
-    });
-    return DOMPurify.sanitize(highlighted, {
-      ALLOWED_TAGS: [
-        'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'del',
-        'ul', 'ol', 'li', 'a', 'code', 'pre',
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-        'blockquote', 'hr', 'mark', 'sup', 'sub', 'div', 'span',
-        'table', 'thead', 'tbody', 'tr', 'th', 'td',
-        'img',
-      ],
-      ALLOWED_ATTR: ['href', 'target', 'rel', 'style', 'class', 'src', 'alt'],
-    });
-  }
 
   function closeArticle() {
     readingEssay = null;
@@ -190,17 +156,6 @@
   const SIGN_OUT_HOLD_MS = 2000;
   const DELETE_ACCOUNT_HOLD_MS = 4000;
   const AUTH_FEEDBACK_CROSSFADE_MS = 240;
-
-  function renderChangelog(text: string): string {
-    if (!text) return '';
-    if (typeof window === 'undefined' || typeof DOMPurify === 'undefined') {
-      return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-    }
-    const rawHtml = marked.parse(text, { breaks: true, gfm: true }) as string;
-    return DOMPurify.sanitize(rawHtml, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'],
-    });
-  }
 
   let currentUser = $state<SupabaseUser | null>(null);
   let isAuthLoading = $state(true);
@@ -308,7 +263,7 @@
   let writingCount = $derived(essays.length);
   let libraryEssays = $derived(
     [...essays].sort(
-      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     ),
   );
 
@@ -323,31 +278,19 @@
     );
   });
 
-  let libraryDeleteTargetId = $state<string | null>(null);
-  let libraryDeleteProgress = $state(0);
-  let libraryDeleteTimer: ReturnType<typeof setInterval> | null = null;
+  let libraryDeleteConfirmId = $state<string | null>(null);
 
-  function stopLibraryDeleteHold() {
-    if (libraryDeleteTimer) clearInterval(libraryDeleteTimer);
-    libraryDeleteTimer = null;
-    libraryDeleteProgress = 0;
-    libraryDeleteTargetId = null;
+  function handleLibraryDelete(essayId: string) {
+    if (libraryDeleteConfirmId === essayId) {
+      libraryDeleteConfirmId = null;
+      void performLibraryDelete(essayId);
+    } else {
+      libraryDeleteConfirmId = essayId;
+    }
   }
 
-  function startLibraryDeleteHold(essayId: string) {
-    libraryDeleteTargetId = essayId;
-    const startTime = Date.now();
-    libraryDeleteProgress = 0;
-    libraryDeleteTimer = setInterval(() => {
-      libraryDeleteProgress = Math.min(((Date.now() - startTime) / 1100) * 100, 100);
-      if (libraryDeleteProgress >= 100) {
-        clearInterval(libraryDeleteTimer!);
-        libraryDeleteTimer = null;
-        libraryDeleteProgress = 0;
-        libraryDeleteTargetId = null;
-        void performLibraryDelete(essayId);
-      }
-    }, 16);
+  function clearLibraryDeleteConfirm() {
+    libraryDeleteConfirmId = null;
   }
 
   async function performLibraryDelete(essayId: string) {
@@ -367,9 +310,6 @@
 
   let currentEssay = $derived(essays.find(e => e.id === currentEssayId) ?? null);
   let isPublished = $derived(!!(currentEssay?.is_public || (currentEssayId && editorSlug && essays.some(e => e.id === currentEssayId && e.is_public))));
-
-  // For the CTA label transform
-  let mainActionLabel = $derived(isPublished ? 'UPDATE' : 'PUBLISH');
 
   // View modes for main menu
   let viewMode = $state<'feed' | 'library'>('feed');
@@ -391,6 +331,23 @@
   let searchExpanded = $state(false);
   let searchInputEl = $state<HTMLInputElement | null>(null);
   let feedSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let logoEyeOpen = $state(
+    typeof localStorage !== 'undefined' && localStorage.getItem('logoEyeOpen') === 'true'
+  );
+
+  function toggleLogoEye() {
+    logoEyeOpen = !logoEyeOpen;
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.setItem('logoEyeOpen', String(logoEyeOpen)); } catch {}
+    }
+  }
+
+  $effect(() => {
+    const html = document.documentElement;
+    html.classList.toggle('dark', !logoEyeOpen);
+    html.classList.add('theme-transitioning');
+    setTimeout(() => html.classList.remove('theme-transitioning'), 250);
+  });
 
   let isFeedSearching = $derived(searchQuery.trim().length > 0 && viewMode === 'feed');
 
@@ -469,32 +426,6 @@
       .trim();
     if (text.length > maxLength) text = text.slice(0, maxLength).trim() + '…';
     return text;
-  }
-
-  function renderExcerpt(md: string, maxLength = 200): string {
-    if (!md) return '';
-    const processed = md
-      .replace(/(?<!=)==(.+?)==(?!=)/g, '<mark>$1</mark>')
-      .replace(/\^(.+?)\^/g, '<sup>$1</sup>')
-      .replace(/(?<!~)~(.+?)~(?!~)/g, '<sub>$1</sub>');
-    let html = marked.parse(processed, { breaks: true, gfm: true }) as string;
-    html = html.replace(/<pre><code(\s+class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g, (_m, cls, code) => {
-      const decoded = code
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-      const result = hljs.highlightAuto(decoded);
-      return `<pre><code class="hljs language-${result.language}">${result.value}</code></pre>`;
-    });
-    if (html.length > maxLength) {
-      html = html.slice(0, maxLength);
-      const lastSpace = html.lastIndexOf(' ');
-      if (lastSpace > 0) html = html.slice(0, lastSpace);
-      html += '…';
-    }
-    return html;
   }
 
   // Lift Tracker-style primary CTA (for WRITE button matching START WORKOUT)
@@ -1378,7 +1309,7 @@
       essaysLoadedOnce = true;
       const m = new Map<string, string>();
       for (const e of list) {
-        m.set(e.id, renderExcerpt(e.content, 120));
+        m.set(e.id, renderExcerpt(e.content, LIBRARY_EXCERPT_LINES));
       }
       libraryExcerpts = m;
     } catch (e) {
@@ -1406,6 +1337,32 @@
     } finally {
       publicFeedLoading = false;
     }
+  }
+
+  function feedTouchStart(e: TouchEvent) {
+    feedTouchStartY = e.touches[0].clientY;
+    feedTouchId = e.touches[0].identifier;
+    feedPullY = 0;
+  }
+  function feedTouchMove(e: TouchEvent) {
+    if (feedTouchId === null) return;
+    const t = [...e.changedTouches].find(t => t.identifier === feedTouchId);
+    if (!t) return;
+    if (feedScrollEl && feedScrollEl.scrollTop > 0) return;
+    const dy = t.clientY - feedTouchStartY;
+    if (dy <= 0) return;
+    feedPullY = Math.min(dy * 0.5, 120);
+    e.preventDefault();
+  }
+  function feedTouchEnd() {
+    if (feedPullY > 60 && !publicFeedLoading && !feedRefreshing) {
+      feedRefreshing = true;
+      void loadPublicFeed().finally(() => { feedRefreshing = false; feedPullY = 0; });
+    } else {
+      feedPullY = 0;
+    }
+    feedTouchId = null;
+    feedTouchStartY = 0;
   }
 
   function pushHistory() {
@@ -1592,9 +1549,46 @@
     }
   }
 
-  async function handlePublish() {
-    saveError = null;
-    await saveCurrent(true);
+  function togglePublish() {
+    const newPublic = !isPublished;
+    const idx = essays.findIndex(e => e.id === currentEssayId);
+    if (idx >= 0) {
+      essays = essays.with(idx, { ...essays[idx], is_public: newPublic });
+    }
+    db.saveEssay({
+      id: currentEssayId,
+      title: editorTitle || 'Untitled',
+      content: editorContent,
+      slug: editorSlug || slugifyTitle(editorTitle || 'Untitled'),
+      is_public: newPublic,
+    }).then(() => {
+      void loadPublicFeed().catch(() => {});
+    }).catch((e) => {
+      console.error('[toggle] publish failed', e);
+      if (idx >= 0) {
+        essays = essays.with(idx, { ...essays[idx], is_public: !newPublic });
+      }
+    });
+  }
+
+  async function toggleLibraryPublish(essay: Essay) {
+    const newPublic = !essay.is_public;
+    const idx = essays.findIndex(e => e.id === essay.id);
+    if (idx >= 0) {
+      essays = essays.with(idx, { ...essays[idx], is_public: newPublic });
+    }
+    try {
+      await db.saveEssay({
+        ...essay,
+        is_public: newPublic,
+      });
+      void loadPublicFeed().catch(() => {});
+    } catch (e) {
+      console.error('[library] toggle publish failed', e);
+      if (idx >= 0) {
+        essays = essays.with(idx, { ...essays[idx], is_public: !newPublic });
+      }
+    }
   }
 
   function openEditorForEssay(essay: Essay) {
@@ -1895,10 +1889,62 @@
   });
 
   // Keep writings count fresh in chip (already reactive via writingCount)
+
+  // === Realtime feed updates ===
+  let feedChannel: ReturnType<typeof supabase.channel> | null = null;
+  let feedRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $effect(() => {
+    if (!publicFeedLoadedOnce || feedChannel) return;
+
+    feedChannel = supabase.channel('feed-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'essays', filter: 'is_public=eq.true' },
+        () => scheduleFeedRefresh(),
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'usernames' },
+        () => scheduleFeedRefresh(),
+      )
+      .subscribe();
+  });
+
+  onDestroy(() => {
+    if (feedChannel) {
+      supabase.removeChannel(feedChannel);
+      feedChannel = null;
+    }
+    if (feedRefreshTimer) {
+      clearTimeout(feedRefreshTimer);
+      feedRefreshTimer = null;
+    }
+  });
+
+  function scheduleFeedRefresh() {
+    if (feedRefreshTimer) clearTimeout(feedRefreshTimer);
+    feedRefreshTimer = setTimeout(() => {
+      feedRefreshTimer = null;
+      if (publicFeedLoadedOnce) void loadPublicFeed();
+    }, 2000);
+  }
+
+  // Keep writings count fresh in chip (already reactive via writingCount)
 </script>
 
 {#snippet panelHeaderRow()}
   <div class="settings-panel-header__brand-row">
+    <button
+      type="button"
+      class="settings-panel-brand__eye"
+      onclick={toggleLogoEye}
+      aria-label={logoEyeOpen ? 'Close eye' : 'Open eye'}
+    >
+      {#if logoEyeOpen}
+        <Eye class="settings-panel-brand__eye-icon" aria-hidden="true" />
+      {:else}
+        <EyeClosed class="settings-panel-brand__eye-icon" aria-hidden="true" />
+      {/if}
+    </button>
     <span class="settings-panel-brand__lift">Tractatus</span>
   </div>
 {/snippet}
@@ -1916,28 +1962,39 @@
           class:pub-header-logo--hidden={searchExpanded && !articleMode && !writingMode}
           aria-hidden={searchExpanded && !writingMode && !articleMode}
         >
+          <button
+            type="button"
+            class="pub-header-logo-eye"
+            onclick={toggleLogoEye}
+            aria-label={logoEyeOpen ? 'Close eye' : 'Open eye'}
+          >
+            {#if logoEyeOpen}
+              <Eye class="pub-header-logo-icon" aria-hidden="true" />
+            {:else}
+              <EyeClosed class="pub-header-logo-icon" aria-hidden="true" />
+            {/if}
+          </button>
           Tractatus
         </div>
-      </div>
-
-      <div
-        class="pub-header-search-slot"
-        class:pub-header-search-slot--open={searchExpanded}
-        class:pub-header-search-slot--hidden={articleMode}
-        aria-hidden={articleMode || undefined}
-        inert={articleMode || undefined}
-      >
-        <input
-          bind:this={searchInputEl}
-          type="search"
-          class="pub-header-search-input"
-          placeholder={viewMode === 'library' ? 'Filter essays…' : 'Search essays'}
-          value={searchQuery}
-          oninput={(e) => onSearchInput(e.currentTarget.value)}
-          onkeydown={onSearchKeydown}
-          aria-label={viewMode === 'library' ? 'Filter your essays' : 'Search all public essays'}
-          tabindex={searchExpanded ? 0 : -1}
-        />
+        <div
+          class="pub-header-search-slot"
+          class:pub-header-search-slot--open={searchExpanded && !articleMode && !writingMode}
+          class:pub-header-search-slot--hidden={articleMode}
+          aria-hidden={articleMode || undefined}
+          inert={articleMode || undefined}
+        >
+          <input
+            bind:this={searchInputEl}
+            type="search"
+            class="pub-header-search-input"
+            placeholder={viewMode === 'library' ? 'Filter essays…' : 'Search essays'}
+            value={searchQuery}
+            oninput={(e) => onSearchInput(e.currentTarget.value)}
+            onkeydown={onSearchKeydown}
+            aria-label={viewMode === 'library' ? 'Filter your essays' : 'Search all public essays'}
+            tabindex={searchExpanded ? 0 : -1}
+          />
+        </div>
       </div>
 
       <div class="pub-header-actions">
@@ -1962,12 +2019,12 @@
         {#if writingMode}
           <button
             type="button"
-            class="pub-header-publish-btn"
-            onclick={handlePublish}
-            disabled={isSaving}
+            class="pub-header-meta-chip"
+            class:pub-header-meta-chip--draft={!isPublished}
+            class:pub-header-meta-chip--public={isPublished}
+            onclick={togglePublish}
           >
-            <BookOpen class="size-3" aria-hidden="true" />
-            {mainActionLabel}
+            {isPublished ? 'Public' : 'Draft'}
           </button>
         {/if}
         {#if currentUser}
@@ -2008,19 +2065,21 @@
         </button>
         {#if writingMode}
           <div class="pub-header-meta">
-            <div class="pub-header-meta-status">
-              <span class="pub-header-meta-dot" class:pub-header-meta-dot--active={isSaving}></span>
-              <span>
-                {#if isSaving}
-                  Saving…
-                {:else if lastSavedAt}
-                  Saved {Math.max(0, Math.floor((Date.now() - lastSavedAt) / 1000))}s ago
-                {:else}
-                  Draft
-                {/if}
-              </span>
-            </div>
             <span class="pub-header-meta-wordcount">{editorWordCount} words · {fmtReadTime(editorReadMins)}</span>
+            <span
+              class="pub-header-meta-chip"
+              class:pub-header-meta-chip--unsaved={!isSaving && !lastSavedAt}
+              class:pub-header-meta-chip--saving={isSaving}
+              class:pub-header-meta-chip--saved={!isSaving && !!lastSavedAt}
+            >
+              {#if isSaving}
+                Saving
+              {:else if lastSavedAt}
+                Saved
+              {:else}
+                Unsaved
+              {/if}
+            </span>
           </div>
         {/if}
       </div>
@@ -2066,12 +2125,12 @@
       >
         {essay.title || 'Untitled'}
       </span>
-      {#if renderExcerpt(essay.content, FEED_EXCERPT_FEATURED)}
+      {#if renderExcerpt(essay.content, featured ? FEED_EXCERPT_FEATURED_LINES : FEED_EXCERPT_ITEM_LINES)}
         <div
           class="pub-feed-card-excerpt markdown-content"
           class:pub-feed-card-excerpt--featured={featured}
         >
-          {@html renderExcerpt(essay.content, FEED_EXCERPT_FEATURED)}
+          {@html renderExcerpt(essay.content, featured ? FEED_EXCERPT_FEATURED_LINES : FEED_EXCERPT_ITEM_LINES)}
         </div>
       {/if}
     </div>
@@ -2267,26 +2326,6 @@
         />
       </div>
 
-      {#if currentEssayId}
-        <div class="editor-action-bar mx-3">
-          <button
-            type="button"
-            title="Hold to delete essay"
-            class="editor-action-btn {deleteHoldProgress > 0 ? 'editor-action-btn--danger-hold' : 'editor-action-btn--danger'}"
-            onmousedown={startDeleteHold}
-            onmouseup={stopDeleteHold}
-            onmouseleave={stopDeleteHold}
-            ontouchstart={startDeleteHold}
-            ontouchend={stopDeleteHold}
-            disabled={isSaving}
-          >
-            <div class="settings-panel-action-btn__fill settings-panel-action-btn__fill--delete" style="width: {deleteHoldProgress}%;"></div>
-            <span class="settings-panel-action-btn__label">
-              <Trash2 class="size-3.5 shrink-0 pointer-events-none" aria-hidden="true" />
-            </span>
-          </button>
-        </div>
-      {/if}
     </div>
   {:else}
     {#if !readingEssay && !readingEssayLoading}
@@ -2337,7 +2376,14 @@
                 >
                   <div class="library-card-top">
                     <div class="library-card-title">{essay.title || 'Untitled'}</div>
-                    <span class="library-card-badge" class:library-card-badge--public={essay.is_public}>
+                    <span
+                      class="library-card-badge"
+                      class:library-card-badge--public={essay.is_public}
+                      role="button"
+                      tabindex="0"
+                      onclick={(e) => { e.stopPropagation(); toggleLibraryPublish(essay); }}
+                      onkeydown={(e) => e.key === 'Enter' && toggleLibraryPublish(essay)}
+                    >
                       {essay.is_public ? 'Public' : 'Draft'}
                     </span>
                   </div>
@@ -2357,19 +2403,16 @@
                 <button
                   type="button"
                   class="library-card-delete"
-                  class:library-card-delete--hold={libraryDeleteTargetId === essay.id && libraryDeleteProgress > 0}
-                  aria-label="Delete essay"
-                  title="Hold to delete"
-                  onmousedown={() => startLibraryDeleteHold(essay.id)}
-                  onmouseup={stopLibraryDeleteHold}
-                  onmouseleave={stopLibraryDeleteHold}
-                  ontouchstart={() => startLibraryDeleteHold(essay.id)}
-                  ontouchend={stopLibraryDeleteHold}
+                  class:library-card-delete--confirm={libraryDeleteConfirmId === essay.id}
+                  aria-label={libraryDeleteConfirmId === essay.id ? 'Confirm delete' : 'Delete essay'}
+                  onclick={() => handleLibraryDelete(essay.id)}
+                  onblur={clearLibraryDeleteConfirm}
                 >
-                  {#if libraryDeleteTargetId === essay.id && libraryDeleteProgress > 0}
-                    <div class="library-card-delete-fill" style="width: {libraryDeleteProgress}%;"></div>
+                  {#if libraryDeleteConfirmId === essay.id}
+                    Sure?
+                  {:else}
+                    <Trash2 class="size-3" aria-hidden="true" />
                   {/if}
-                  <Trash2 class="size-3" aria-hidden="true" />
                 </button>
               </div>
             {/each}
@@ -2377,7 +2420,29 @@
         {/if}
     </div>
   {:else}
-    <div class="pub-scroll no-scrollbar" in:fly={{ x: -6, duration: 160, opacity: 1 }}>
+    <div
+      class="pub-scroll no-scrollbar"
+      class:pub-scroll--refreshing={feedRefreshing}
+      bind:this={feedScrollEl}
+      ontouchstart={feedTouchStart}
+      ontouchmove={feedTouchMove}
+      ontouchend={feedTouchEnd}
+      in:fly={{ x: -6, duration: 160, opacity: 1 }}
+    >
+      {#if feedPullY > 0 || feedRefreshing}
+        <div class="pub-feed-pull-indicator" style="height: {feedRefreshing ? 32 : feedPullY}px;">
+          {#if feedRefreshing}
+            <svg class="pub-feed-spinner" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" />
+            </svg>
+            <span class="pub-feed-pull-label">Refreshing…</span>
+          {:else if feedPullY > 60}
+            <span class="pub-feed-pull-label">Release to refresh</span>
+          {:else}
+            <span class="pub-feed-pull-label">Pull to refresh</span>
+          {/if}
+        </div>
+      {/if}
       {#if readingEssayLoading}
         <div class="pub-empty">Loading article…</div>
       {:else if readingEssayError}
@@ -2405,7 +2470,7 @@
               {countWords(readingEssay.content)} words · {fmtReadTime(estimateReadTimeMinutes(readingEssay.content))}
             </span>
           </div>
-          <div class="pub-article-prose reader-prose markdown-content">
+          <div class="pub-article-prose reader-prose markdown-content" onclick={onArticleProseClick}>
             {@html renderEssay(readingEssay.content)}
           </div>
         </article>
@@ -2429,7 +2494,12 @@
           {/each}
         {/if}
       {:else if publicFeedLoading}
-        <div class="pub-empty">Loading essays…</div>
+        <div class="pub-feed-loading">
+          <svg class="pub-feed-spinner" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" />
+          </svg>
+          <span>Refreshing…</span>
+        </div>
       {:else if publicFeed.length === 0}
         <div class="pub-empty">
           <div class="pub-empty-title">The feed is quiet right now.</div>
@@ -2461,7 +2531,7 @@
         onclick={handleWriteFabClick}
         aria-label={currentUser ? 'Write new essay' : 'Sign in to write'}
       >
-        <Plus class="size-6" aria-hidden="true" />
+        <Plus class="size-8" aria-hidden="true" />
       </button>
     {/if}
   </div>
@@ -2524,7 +2594,21 @@
       onclick={(e) => e.stopPropagation()}
     >
       <div class="settings-panel-header">
-        <span class="settings-panel-brand__lift">Tractatus</span>
+        <div class="settings-panel-header__brand-row">
+          <button
+            type="button"
+            class="settings-panel-brand__eye"
+            onclick={toggleLogoEye}
+            aria-label={logoEyeOpen ? 'Close eye' : 'Open eye'}
+          >
+            {#if logoEyeOpen}
+              <Eye class="settings-panel-brand__eye-icon" aria-hidden="true" />
+            {:else}
+              <EyeClosed class="settings-panel-brand__eye-icon" aria-hidden="true" />
+            {/if}
+          </button>
+          <span class="settings-panel-brand__lift">Tractatus</span>
+        </div>
         <button
           type="button"
           aria-label="Close"
@@ -2890,7 +2974,7 @@
               <div class="update-version-num update-version-num--muted">v{APP_VERSION}</div>
             </div>
 
-            <div class="update-version-arrow" aria-hidden="true">→</div>
+            <ChevronRight class="update-version-arrow" aria-hidden="true" />
 
             <div class="flex flex-col items-center">
               <div class="update-version-num update-version-num--new">v{updateInfo.version}</div>

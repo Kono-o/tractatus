@@ -12,12 +12,16 @@
   import Underline from '@tiptap/extension-underline';
   import { marked } from 'marked';
   import TurndownService from 'turndown';
+  import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+  import { common, createLowlight } from 'lowlight';
   import {
     Bold, Italic, Strikethrough, Highlighter, Code,
     Link, Image, Quote, Code2, Minus,
     AlignLeft, AlignCenter, AlignRight, Undo2, Redo2, Sigma,
     List, ListOrdered,
   } from '@lucide/svelte';
+
+  const lowlight = createLowlight(common);
 
   let {
     markdown = '',
@@ -42,7 +46,7 @@
   } = $props();
 
   let editorEl: HTMLDivElement;
-  let titleInputEl: HTMLInputElement | undefined;
+  let titleInputEl: HTMLTextAreaElement | undefined;
   let editor: Editor | null = null;
   let isUpdatingFromProp = false;
   let activeStates = $state<Record<string, boolean>>({});
@@ -154,7 +158,6 @@
   onMount(() => {
     if (autoFocusTitle && titleInputEl) {
       titleInputEl.focus();
-      titleInputEl.select();
     }
     const initialHtml = mdToHtml(markdown);
     editor = new Editor({
@@ -162,8 +165,9 @@
       extensions: [
         StarterKit.configure({
           heading: { levels: [1, 2, 3, 4, 5, 6] },
-          codeBlock: { HTMLAttributes: { class: 'editor-code-block' } },
+          codeBlock: false,
         }),
+        CodeBlockLowlight.configure({ lowlight }),
         Highlight.configure({ multicolor: false }),
         Subscript,
         Superscript,
@@ -442,8 +446,7 @@
   </div>
 </div>
 
-<input
-  type="text"
+<textarea
   bind:this={titleInputEl}
   class="editor-title-input"
   placeholder="Title"
@@ -451,7 +454,8 @@
   oninput={onTitleInput}
   onblur={onTitleBlur}
   disabled={titleDisabled}
-/>
+  rows={1}
+></textarea>
 
 <div class="editor-rich-content" class:editor-rich-content--empty={!markdown}>
   <div bind:this={editorEl}></div>
