@@ -1957,11 +1957,7 @@
       class:pub-header--article={articleMode}
     >
       <div class="pub-header-start">
-        <div
-          class="pub-header-logo"
-          class:pub-header-logo--hidden={searchExpanded && !articleMode && !writingMode}
-          aria-hidden={searchExpanded && !writingMode && !articleMode}
-        >
+        <div class="pub-header-logo">
           <button
             type="button"
             class="pub-header-logo-eye"
@@ -1974,8 +1970,15 @@
               <EyeClosed class="pub-header-logo-icon" aria-hidden="true" />
             {/if}
           </button>
-          Tractatus
+          <span
+            class="pub-header-logo-text"
+            class:pub-header-logo-text--hidden={searchExpanded && !articleMode && !writingMode}
+            aria-hidden={searchExpanded && !writingMode && !articleMode || undefined}
+          >Tractatus</span>
         </div>
+      </div>
+
+      <div class="pub-header-actions">
         <div
           class="pub-header-search-slot"
           class:pub-header-search-slot--open={searchExpanded && !articleMode && !writingMode}
@@ -1995,9 +1998,6 @@
             tabindex={searchExpanded ? 0 : -1}
           />
         </div>
-      </div>
-
-      <div class="pub-header-actions">
         <button
           type="button"
           class="pub-header-icon-btn pub-header-icon-btn--plain"
@@ -2397,8 +2397,8 @@
                     {#if essay.is_public && essay.published_at}
                       <span class="library-card-dot" aria-hidden="true">·</span>
                       <span>Published {formatFeedDate(essay.published_at)}</span>
-                    {/if}
-                  </div>
+        {/if}
+      </div>
                 </button>
                 <button
                   type="button"
