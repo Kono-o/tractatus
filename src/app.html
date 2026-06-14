@@ -7,12 +7,13 @@
 			content="width=device-width, initial-scale=1, viewport-fit=cover"
 		/>
 		<meta name="text-scale" content="scale" />
-		<meta name="theme-color" content="#f8f4eb" />
+		<meta name="theme-color" id="theme-color" content="#000000" />
+		<link rel="icon" type="image/svg+xml" href="/icon-dark.svg" id="favicon" />
+		<link rel="apple-touch-icon" href="/icon-dark.svg" id="apple-touch-icon" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<meta name="apple-mobile-web-app-title" content="Tractatus" />
 		<link rel="manifest" href="/manifest.webmanifest" />
-		<link rel="apple-touch-icon" href="/icon.svg" />
 		<style>
 			html:not(.fonts-ready) body {
 				visibility: hidden;
@@ -30,6 +31,37 @@
 					reveal();
 				}
 				setTimeout(reveal, 2000);
+
+				function updateTheme(isDark) {
+					var favicon = document.getElementById('favicon');
+					var appleTouch = document.getElementById('apple-touch-icon');
+					var themeColor = document.getElementById('theme-color');
+					if (isDark) {
+						if (favicon) favicon.href = '/icon-dark.svg';
+						if (appleTouch) appleTouch.href = '/icon-dark.svg';
+						if (themeColor) themeColor.content = '#000000';
+					} else {
+						if (favicon) favicon.href = '/icon-light.svg';
+						if (appleTouch) appleTouch.href = '/icon-light.svg';
+						if (themeColor) themeColor.content = '#f8f4eb';
+					}
+				}
+
+				try {
+					var stored = localStorage.getItem('logoEyeOpen');
+					if (stored === 'true') {
+						root.classList.remove('dark');
+						updateTheme(false);
+					} else {
+						root.classList.add('dark');
+						updateTheme(true);
+					}
+				} catch (_) {}
+
+				var observer = new MutationObserver(function () {
+					updateTheme(root.classList.contains('dark'));
+				});
+				observer.observe(root, { attributes: true, attributeFilter: ['class'] });
 			})();
 		</script>
 		%sveltekit.head%
