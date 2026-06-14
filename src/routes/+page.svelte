@@ -28,6 +28,7 @@
   import type { UpdateInfo } from '$lib/updater';
   import { APP_VERSION } from '$lib/version';
   import { isNativeApp } from '$lib/native';
+  import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
   import type { User as SupabaseUser } from '@supabase/supabase-js';
   import {
     preprocessMarkdown,
@@ -344,9 +345,11 @@
 
   $effect(() => {
     const html = document.documentElement;
-    html.classList.toggle('dark', !logoEyeOpen);
+    const isDark = !logoEyeOpen;
+    html.classList.toggle('dark', isDark);
     html.classList.add('theme-transitioning');
     setTimeout(() => html.classList.remove('theme-transitioning'), 250);
+    _setAppIcon(isDark ? 'dark' : 'light');
   });
 
   let isFeedSearching = $derived(searchQuery.trim().length > 0 && viewMode === 'feed');
