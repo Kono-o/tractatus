@@ -344,12 +344,18 @@
   }
 
   $effect(() => {
-    const html = document.documentElement;
-    const isDark = !logoEyeOpen;
-    html.classList.toggle('dark', isDark);
-    html.classList.add('theme-transitioning');
-    setTimeout(() => html.classList.remove('theme-transitioning'), 250);
-    _setAppIcon(isDark ? 'dark' : 'light');
+    if (typeof document === 'undefined') return;
+    try {
+      const html = document.documentElement;
+      const isDark = !logoEyeOpen;
+      html.classList.toggle('dark', isDark);
+      html.classList.add('theme-transitioning');
+      setTimeout(() => html.classList.remove('theme-transitioning'), 250);
+      _setAppIcon(isDark ? 'dark' : 'light');
+    } catch (e) {
+      // Defensive: if DOM APIs aren't available or fail, ignore so SSR/hydration doesn't crash
+      console.warn('[logoEye] failed to apply theme class', e);
+    }
   });
 
   let isFeedSearching = $derived(searchQuery.trim().length > 0 && viewMode === 'feed');
