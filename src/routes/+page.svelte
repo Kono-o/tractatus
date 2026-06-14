@@ -41,6 +41,7 @@
   import {
     loadSupabasePanelSnapshot,
     formatSessionExpiry,
+    formatBytes,
     type SupabasePanelSnapshot,
   } from '$lib/supabaseStatus';
   import {
@@ -292,6 +293,15 @@
   });
 
   let writingCount = $derived(essays.length);
+  // total bytes used by essays (sum of title + content lengths)
+  let essaysBytes = $derived.by(() => {
+    return essays.reduce((sum, e) => {
+      const titleLen = e.title ? e.title.length : 0;
+      const contentLen = e.content ? e.content.length : 0;
+      return sum + titleLen + contentLen;
+    }, 0);
+  });
+
   let libraryEssays = $derived(
     [...essays].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -2183,12 +2193,24 @@
     aria-hidden={ghost}
   >
     <div class="flex justify-center text-[9px] text-zinc-400">
-      <span
-        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-[color:var(--surf)] rounded border border-[color:var(--border)] justify-center text-[color:var(--hint)]"
-        class:boot-panel-placeholder={ghost}
-      >
-        <Pencil class="size-3 shrink-0 {ghost ? 'boot-panel-placeholder__ghost' : ''}" aria-hidden="true" />
-        <span class="leading-none {ghost ? 'boot-panel-placeholder__ghost' : ''}">{writingCount} essay{writingCount === 1 ? '' : 's'}</span>
+      <!-- container holds two chips horizontally -->
+      <span class="inline-flex items-center gap-2">
+        <span
+          class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-[color:var(--surf)] rounded border border-[color:var(--border)] justify-center text-[color:var(--hint)]"
+          class:boot-panel-placeholder={ghost}
+        >
+          <Pencil class="size-3 shrink-0 {ghost ? 'boot-panel-placeholder__ghost' : ''}" aria-hidden="true" />
+          <span class="leading-none {ghost ? 'boot-panel-placeholder__ghost' : ''}">{writingCount} essay{writingCount === 1 ? '' : 's'}</span>
+        </span>
+
+        <span
+          class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-[color:var(--surf)] rounded border border-[color:var(--border)] justify-center text-[color:var(--hint)]"
+          class:boot-panel-placeholder={ghost}
+          aria-label="Total storage used by essays"
+        >
+          <Sigma class="size-3 shrink-0 {ghost ? 'boot-panel-placeholder__ghost' : ''}" aria-hidden="true" />
+          <span class="leading-none {ghost ? 'boot-panel-placeholder__ghost' : ''}">{formatBytes(essaysBytes ?? 0)}</span>
+        </span>
       </span>
     </div>
   </div>
