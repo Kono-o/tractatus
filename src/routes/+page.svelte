@@ -121,6 +121,36 @@
     readingEssayLoading = false;
   }
 
+  // Click handler for rendered article HTML. Delegates copy-button clicks and anchors.
+  function onArticleProseClick(e: MouseEvent) {
+    try {
+      // Copy button handler (defined in src/lib/markdown.ts)
+      handleCodeCopyClick(e);
+    } catch (err) {
+      // ignore
+    }
+
+    const tgt = e.target as HTMLElement | null;
+    if (!tgt) return;
+
+    // If an anchor (<a>) was clicked, handle external links by opening in new tab
+    const a = tgt.closest('a') as HTMLAnchorElement | null;
+    if (a && a.href) {
+      const href = a.getAttribute('href') || '';
+      // Let same-page anchors and internal routes behave normally
+      if (href.startsWith('#') || href.startsWith('/') || href.startsWith(window.location.origin)) {
+        return;
+      }
+      // External link: open in new tab and prevent default navigation
+      try {
+        window.open(href, '_blank', 'noopener');
+        e.preventDefault();
+      } catch (err) {
+        // ignore
+      }
+    }
+  }
+
   async function openArticle(essay: Essay) {
     viewMode = 'feed';
     if (searchExpanded) await toggleSearch();
