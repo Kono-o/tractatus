@@ -26,10 +26,14 @@ export const GET: RequestHandler = async ({ url, request }) => {
     throw error(429, 'Too many searches. Try again later.');
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
   const res = await fetch(
-    `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=12&fields=key,title,author_name,cover_i,first_publish_year,edition_count`,
-    { headers: { 'User-Agent': 'Tractatus/1.0' } },
+    `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=8&fields=key,title,author_name,cover_i,first_publish_year`,
+    { headers: { 'User-Agent': 'Tractatus/1.0' }, signal: controller.signal },
   );
+  clearTimeout(timeout);
 
   if (!res.ok) {
     throw error(502, 'OpenLibrary search failed');

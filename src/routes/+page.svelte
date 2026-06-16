@@ -464,6 +464,7 @@
   }
 
   let diarySearchQuery = $state('');
+  let diarySearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   function onSearchInput(value: string) {
     searchQuery = value;
@@ -473,7 +474,10 @@
       return;
     }
     if (viewMode === 'diary') {
-      diarySearchQuery = value;
+      if (diarySearchDebounceTimer) clearTimeout(diarySearchDebounceTimer);
+      diarySearchDebounceTimer = setTimeout(() => {
+        diarySearchQuery = value;
+      }, 350);
       return;
     }
     if (value.trim()) viewMode = 'feed';

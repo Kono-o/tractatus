@@ -46,8 +46,6 @@
     void loadLogs();
   });
 
-  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
   async function doSearch(term: string) {
     if (term.length < 2) {
       searchResults = [];
@@ -74,19 +72,13 @@
 
   $effect(() => {
     const q = searchQuery;
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
     searchError = null;
-    if (!q.trim()) {
+    if (!q.trim() || q.trim().length < 2) {
       searchResults = [];
       searchLoading = false;
       return;
     }
-    const timer = setTimeout(() => void doSearch(q.trim()), 350);
-    searchDebounceTimer = timer;
-
-    return () => {
-      clearTimeout(timer);
-    };
+    void doSearch(q.trim());
   });
 
   function selectBook(book: BookResult) {
@@ -309,7 +301,7 @@
         {#each searchResults as book}
           <button type="button" class="diary-result" onclick={() => selectBook(book)}>
             {#if book.coverUrl}
-              <img src={book.coverUrl} alt={book.title} class="diary-result-cover" />
+              <img src={book.coverUrl} alt={book.title} class="diary-result-cover" loading="lazy" />
             {:else}
               <div class="diary-result-cover diary-result-cover--empty">
                 <BookMarked class="size-5" aria-hidden="true" />
