@@ -82,7 +82,7 @@
     width={size}
     height={size}
     class={`generated-avatar overflow-hidden ${className}`}
-    style={`border-radius: ${borderRadius}; object-fit: cover;`}
+    style={`border-radius: ${borderRadius}; object-fit: cover; box-shadow: 0 0 0 1px var(--rule2);`}
     alt=""
     loading="lazy"
     onerror={() => { imgError = true; }}
@@ -93,7 +93,7 @@
     height={size}
     viewBox="0 0 100 100"
     class={`generated-avatar overflow-hidden ${className}`}
-    style={`border-radius: ${borderRadius};`}
+    style={`border-radius: ${borderRadius}; box-shadow: 0 0 0 1px var(--rule2);`}
     aria-hidden="true"
   >
     <rect x="0" y="0" width="100" height="100" fill={avatarData.bgColor} rx={rounded} />

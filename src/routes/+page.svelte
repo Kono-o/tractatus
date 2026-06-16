@@ -81,6 +81,7 @@
     User,
     Eye,
     EyeClosed,
+    Upload,
   } from '@lucide/svelte';
 
   const FEED_SEARCH_DEBOUNCE_MS = 280;
@@ -210,7 +211,10 @@
   let avatarShuffleCooldown = $state(false);
   let avatarUrl = $state<string | null>(null);
   let avatarUploading = $state(false);
-  let avatarDeleteConfirm = $state(false);
+  let avatarRemoveProgress = $state(0);
+  let avatarRemoveTapPulseActive = $state(false);
+  let avatarRemoveHoldTimer: ReturnType<typeof setInterval> | undefined;
+  let avatarRemoveHoldEndTimer: ReturnType<typeof setTimeout> | undefined;
 
   let accountBusy = $state(false);
   let accountError = $state<string | null>(null);
@@ -1044,11 +1048,43 @@
       }
       await db.saveAvatarUrl(null);
       avatarUrl = null;
-      avatarDeleteConfirm = false;
     } catch (e: any) {
       accountError = e?.message || 'Remove failed.';
     } finally {
       avatarUploading = false;
+    }
+  }
+
+  function startAvatarRemoveHold() {
+    if (avatarUploading) return;
+    avatarRemoveProgress = 0;
+    avatarRemoveTapPulseActive = false;
+    clearInterval(avatarRemoveHoldTimer);
+    clearTimeout(avatarRemoveHoldEndTimer);
+    const start = Date.now();
+    avatarRemoveHoldTimer = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(100, (elapsed / 2000) * 100);
+      avatarRemoveProgress = pct;
+      if (pct >= 100) {
+        clearInterval(avatarRemoveHoldTimer);
+        avatarRemoveHoldTimer = undefined;
+        avatarRemoveProgress = 0;
+        void handleAvatarRemove();
+      }
+    }, 16);
+  }
+
+  function stopAvatarRemoveHold() {
+    if (avatarRemoveProgress >= 100) return;
+    clearInterval(avatarRemoveHoldTimer);
+    avatarRemoveHoldTimer = undefined;
+    if (avatarRemoveProgress > 0) {
+      avatarRemoveTapPulseActive = true;
+      avatarRemoveProgress = 0;
+      avatarRemoveHoldEndTimer = setTimeout(() => {
+        avatarRemoveTapPulseActive = false;
+      }, 500);
     }
   }
 
@@ -1223,7 +1259,12 @@
     holdCautionMorphFade = true;
     resetChangePasswordForm();
     accountError = null;
-    avatarDeleteConfirm = false;
+    avatarRemoveProgress = 0;
+    avatarRemoveTapPulseActive = false;
+    clearInterval(avatarRemoveHoldTimer);
+    clearTimeout(avatarRemoveHoldEndTimer);
+    avatarRemoveHoldTimer = undefined;
+    avatarRemoveHoldEndTimer = undefined;
   }
 
   function pulseSignOutTapFlash() {
@@ -2171,7 +2212,7 @@
             aria-label="Account and settings"
           >
           {#key avatarSeed + '' + avatarUrl}
-            <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={28} rounded={0} />
+            <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={28} rounded={20} />
           {/key}
         </button>
         {:else}
@@ -2241,7 +2282,7 @@
               seed={essay.author_avatar_seed}
               avatarUrl={essay.author_avatar_url}
               size={featured ? 24 : 20}
-              rounded={0}
+              rounded={20}
             />
           </span>
         {/key}
@@ -2329,19 +2370,17 @@
 
     <div class="settings-panel-body text-[10px] leading-snug">
       {#if bootAccountReveal && currentUser && panel}
-        <div class="flex justify-center py-1 boot-panel-reveal-item boot-panel-reveal-item--avatar">
+        <div class="flex flex-col items-center gap-0.5 pb-0.5 boot-panel-reveal-item boot-panel-reveal-item--avatar">
           {#key avatarSeed + '' + avatarUrl}
             <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={80} />
           {/key}
+          <span class="settings-panel-header__name">{accountDisplayName}</span>
+          <span class="text-[10px] text-zinc-500 leading-none">joined {accountMemberSince}</span>
+          <span class="settings-panel-header__user-id leading-none" title={currentUser.id}>{currentUser.id}</span>
         </div>
 
         <div class="settings-panel-stats">
-          <div class="settings-panel-header__identity boot-panel-reveal-item boot-panel-reveal-item--identity">
-            <span class="settings-panel-header__name">{accountDisplayName}</span>
-            <span class="text-[10px] text-zinc-500">joined {accountMemberSince}</span>
-            <span class="text-[10px] text-zinc-500">Session: {formatSessionExpiry(panel.expiresAt)}</span>
-            <span class="settings-panel-header__user-id" title={currentUser.id}>{currentUser.id}</span>
-          </div>
+          <div class="boot-panel-reveal-item boot-panel-reveal-item--identity">
 
           {@render writingsChip(false, true)}
 
@@ -2350,6 +2389,7 @@
               {panel.sessionError ?? panel.health.error}
             </p>
           {/if}
+          </div>
         </div>
 
         <div class="settings-panel-account boot-panel-reveal-item boot-panel-reveal-item--actions">
@@ -2384,16 +2424,15 @@
           </div>
         </div>
       {:else}
-        <div class="flex justify-center py-1">
+        <div class="flex flex-col items-center gap-0.5 pb-0.5">
           <div class="boot-panel-avatar-spinner" aria-hidden="true"></div>
+          <span class="settings-panel-header__name boot-panel-placeholder__ghost">account name</span>
+          <span class="text-[10px] boot-panel-placeholder__ghost leading-none">joined Jan 2026</span>
+          <span class="settings-panel-header__user-id boot-panel-placeholder__ghost leading-none">00000000-0000-0000-0000-000000000000</span>
         </div>
 
         <div class="settings-panel-stats">
-          <div class="settings-panel-header__identity boot-panel-placeholder" aria-hidden="true">
-            <span class="settings-panel-header__name boot-panel-placeholder__ghost">account name</span>
-            <span class="text-[10px] boot-panel-placeholder__ghost">joined Jan 2026</span>
-            <span class="text-[10px] boot-panel-placeholder__ghost">Session: 1h 00m</span>
-            <span class="settings-panel-header__user-id boot-panel-placeholder__ghost">00000000-0000-0000-0000-000000000000</span>
+          <div class="boot-panel-placeholder" aria-hidden="true">
           </div>
 
           {@render writingsChip(true)}
@@ -2610,7 +2649,7 @@
                   seed={readingEssay.author_avatar_seed}
                   avatarUrl={readingEssay.author_avatar_url}
                   size={24}
-                  rounded={0}
+                  rounded={20}
                 />
               </div>
             {/key}
@@ -2826,30 +2865,33 @@
                 {/key}
               </button>
             {/if}
-            <div class="flex items-center gap-2">
+            <div class="flex items-center justify-center gap-2 pt-1">
               {#if avatarUrl}
                 <button
                   type="button"
-                  class="text-[10px] px-2 py-0.5 rounded border border-rose-400/40 text-rose-500 hover:bg-rose-500/10 transition-colors"
+                  title="Hold 2s to remove profile photo"
+                  class="settings-panel-avatar-remove-btn {avatarRemoveTapPulseActive || avatarRemoveProgress > 0 ? 'settings-panel-avatar-remove-btn--active' : ''} {avatarRemoveTapPulseActive ? 'hold-cancel-tap-pulse' : ''}"
                   disabled={avatarUploading}
-                  onclick={() => {
-                    if (avatarDeleteConfirm) {
-                      void handleAvatarRemove();
-                    } else {
-                      avatarDeleteConfirm = true;
-                    }
-                  }}
-                  onblur={() => { avatarDeleteConfirm = false; }}
+                  onmousedown={startAvatarRemoveHold}
+                  onmouseup={stopAvatarRemoveHold}
+                  onmouseleave={stopAvatarRemoveHold}
+                  ontouchstart={startAvatarRemoveHold}
+                  ontouchend={stopAvatarRemoveHold}
                 >
-                  {avatarUploading ? 'Removing…' : avatarDeleteConfirm ? 'Sure?' : 'Remove photo'}
+                  <div class="settings-panel-avatar-remove-btn__fill" style="width: {avatarRemoveProgress}%;"></div>
+                  <span class="settings-panel-avatar-remove-btn__label">
+                    <Trash2 class="size-3 shrink-0 pointer-events-none" aria-hidden="true" />
+                    {avatarUploading ? 'Removing…' : 'Remove photo'}
+                  </span>
                 </button>
               {:else}
                 <button
                   type="button"
-                  class="text-[10px] px-2 py-0.5 rounded border border-zinc-500/30 text-zinc-500 hover:bg-zinc-500/10 transition-colors"
+                  class="settings-panel-avatar-upload-btn"
                   disabled={avatarUploading}
                   onclick={triggerAvatarUpload}
                 >
+                  <Upload class="size-3 shrink-0 pointer-events-none" aria-hidden="true" />
                   {avatarUploading ? 'Uploading…' : 'Upload photo'}
                 </button>
               {/if}
