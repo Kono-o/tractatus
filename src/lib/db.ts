@@ -442,6 +442,21 @@ export interface EssayWithAuthor extends Essay {
 	author_avatar_url: string | null;
 }
 
+export interface ReadingLog {
+	id: string;
+	user_id: string;
+	book_id: string;
+	title: string;
+	author: string | null;
+	cover_url: string | null;
+	rating: number | null;
+	liked: boolean | null;
+	review: string | null;
+	read_date: string;
+	created_at: string;
+	updated_at: string;
+}
+
 export function slugifyTitle(title: string): string {
 	const base = (title || 'untitled')
 		.toLowerCase()
@@ -922,6 +937,87 @@ export const db = {
 		const essays = (data ?? []) as Essay[];
 		await attachAuthors(essays);
 		return essays;
+	},
+
+	/* ==================================================
+		 READING LOG / DIARY
+		 ================================================== */
+
+	async listReadingLogs(): Promise<ReadingLog[]> {
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!user) return [];
+		const { data, error } = await supabase
+			.from('reading_logs')
+			.select('*')
+			.eq('user_id', user.id)
+			.order('read_date', { ascending: false })
+			.order('created_at', { ascending: false });
+		if (error) throw error;
+		return (data ?? []) as ReadingLog[];
+	},
+
+	async saveReadingLog(params: {
+		id?: string | null;
+		book_id: string;
+		title: string;
+		author: string | null;
+		cover_url: string | null;
+		rating: number | null;
+		liked: boolean | null;
+		review: string | null;
+		read_date: string;
+	}): Promise<ReadingLog> {
+		const { data: { user } } = await supabase.auth.getUser();
+		const uid = user?.id;
+		if (!uid) throw new Error('Not authenticated');
+
+		if (!checkClientRateLimit('save-reading-log', uid, 30, 60_000)) {
+			throw new Error('Too many requests. Try again later.');
+		}
+
+		const now = new Date().toISOString();
+		const payload: any = {
+			book_id: params.book_id,
+			title: (params.title || 'Untitled').trim().slice(0, 500),
+			author: params.author?.trim().slice(0, 200) ?? null,
+			cover_url: params.cover_url?.trim().slice(0, 500) ?? null,
+			rating: params.rating,
+			liked: params.liked,
+			review: params.review?.trim().slice(0, 5000) ?? null,
+			read_date: params.read_date,
+			updated_at: now,
+		};
+
+		if (params.id) {
+			const { data, error } = await supabase
+				.from('reading_logs')
+				.update(payload)
+				.eq('id', params.id)
+				.select('*')
+				.single();
+			if (error) throw error;
+			return data as ReadingLog;
+		} else {
+			payload.user_id = uid;
+			payload.created_at = now;
+			const { data, error } = await supabase
+				.from('reading_logs')
+				.insert(payload)
+				.select('*')
+				.single();
+			if (error) throw error;
+			return data as ReadingLog;
+		}
+	},
+
+	async deleteReadingLog(id: string): Promise<void> {
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!user) throw new Error('Not authenticated');
+		if (!checkClientRateLimit('delete-reading-log', user.id, 10, 60_000)) {
+			throw new Error('Too many requests. Try again later.');
+		}
+		const { error } = await supabase.from('reading_logs').delete().eq('id', id);
+		if (error) throw error;
 	},
 };
 

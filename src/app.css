@@ -3198,11 +3198,18 @@ span.boot-panel-placeholder::after,
   background: transparent;
   border: none;
   padding: 0 0 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .pub-view-tab--active {
   color: var(--ink);
   border-bottom: 1px solid var(--rule);
+}
+
+.pub-view-tab-icon {
+  display: inline-block;
 }
 
 .pub-body {

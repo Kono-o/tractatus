@@ -30,6 +30,7 @@
   import { APP_VERSION } from '$lib/version';
   import { isNativeApp } from '$lib/native';
   import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
+  import DiaryPanel from '$lib/components/DiaryPanel.svelte';
   import type { User as SupabaseUser } from '@supabase/supabase-js';
   import {
     preprocessMarkdown,
@@ -83,6 +84,10 @@
     Eye,
     EyeClosed,
     Upload,
+    Newspaper,
+    BookOpen,
+    BookMarked,
+    Library as LibraryIcon,
   } from '@lucide/svelte';
 
   const FEED_SEARCH_DEBOUNCE_MS = 280;
@@ -104,7 +109,7 @@
     if (isWriting) void exitWriting();
   }
 
-  function selectLibraryTab() {
+  function selectMyLibraryTab() {
     if (!currentUser) {
       openAuthPanel();
       return;
@@ -112,6 +117,18 @@
     viewMode = 'library';
     closeArticle();
     if (isWriting) void exitWriting();
+  }
+
+  function selectBooksTab() {
+    closeArticle();
+    if (isWriting) void exitWriting();
+    viewMode = 'books';
+  }
+
+  function selectDiaryTab() {
+    closeArticle();
+    if (isWriting) void exitWriting();
+    viewMode = 'diary';
   }
 
   let readingEssay = $state<Essay | null>(null);
@@ -372,7 +389,7 @@
   let isPublished = $derived(!!(currentEssay?.is_public || (currentEssayId && editorSlug && essays.some(e => e.id === currentEssayId && e.is_public))));
 
   // View modes for main menu
-  let viewMode = $state<'feed' | 'library'>('feed');
+  let viewMode = $state<'feed' | 'books' | 'diary' | 'library'>('feed');
   let publicFeed = $state<Essay[]>([]);
   let publicFeedLoading = $state(false);
   let publicFeedLoadedOnce = $state(false);
@@ -446,11 +463,17 @@
     }
   }
 
+  let diarySearchQuery = $state('');
+
   function onSearchInput(value: string) {
     searchQuery = value;
     searchQueryError = null;
     if (viewMode === 'library') {
       librarySearchQuery = value;
+      return;
+    }
+    if (viewMode === 'diary') {
+      diarySearchQuery = value;
       return;
     }
     if (value.trim()) viewMode = 'feed';
@@ -2221,11 +2244,11 @@
             bind:this={searchInputEl}
             type="search"
             class="pub-header-search-input"
-            placeholder={viewMode === 'library' ? 'Filter essays…' : 'Search essays'}
+            placeholder={viewMode === 'library' ? 'Filter essays…' : viewMode === 'diary' ? 'Search books…' : 'Search essays'}
             value={searchQuery}
             oninput={(e) => onSearchInput(e.currentTarget.value)}
             onkeydown={onSearchKeydown}
-            aria-label={viewMode === 'library' ? 'Filter your essays' : 'Search all public essays'}
+            aria-label={viewMode === 'library' ? 'Filter your essays' : viewMode === 'diary' ? 'Search books' : 'Search all public essays'}
             tabindex={searchExpanded ? 0 : -1}
           />
         </div>
@@ -2579,29 +2602,67 @@
     </div>
   {:else}
     {#if !readingEssay && !readingEssayLoading}
-    <nav class="pub-view-nav" aria-label="Feed and library">
+    <nav class="pub-view-nav" aria-label="Feed, books, essays, and library">
       <button
         type="button"
         class="pub-view-tab"
         class:pub-view-tab--active={viewMode === 'feed'}
         onclick={selectFeedTab}
       >
+        <Newspaper class="pub-view-tab-icon size-3.5" aria-hidden="true" />
         Feed
       </button>
       {#if currentUser}
         <button
           type="button"
           class="pub-view-tab"
-          class:pub-view-tab--active={viewMode === 'library'}
-          onclick={selectLibraryTab}
+          class:pub-view-tab--active={viewMode === 'books'}
+          onclick={selectBooksTab}
         >
-          Library
+          <BookOpen class="pub-view-tab-icon size-3.5" aria-hidden="true" />
+          Books
+        </button>
+        <button
+          type="button"
+          class="pub-view-tab"
+          class:pub-view-tab--active={viewMode === 'diary'}
+          onclick={selectDiaryTab}
+        >
+          <BookMarked class="pub-view-tab-icon size-3.5" aria-hidden="true" />
+          Diary
+        </button>
+        <button
+          type="button"
+          class="pub-view-tab"
+          class:pub-view-tab--active={viewMode === 'library'}
+          onclick={selectMyLibraryTab}
+        >
+          <LibraryIcon class="pub-view-tab-icon size-3.5" aria-hidden="true" />
+          My Library
         </button>
       {/if}
     </nav>
     {/if}
 
-  {#if currentUser && viewMode === 'library'}
+  {#if viewMode === 'books'}
+    <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
+      <div class="pub-empty">
+        <div class="pub-empty-title">Books</div>
+        <div class="pub-empty-hint">Coming soon.</div>
+      </div>
+    </div>
+  {:else if viewMode === 'diary'}
+    <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
+      {#if currentUser}
+        <DiaryPanel searchQuery={diarySearchQuery} />
+      {:else}
+        <div class="pub-empty">
+          <div class="pub-empty-title">Diary</div>
+          <div class="pub-empty-hint">Sign in to log your reading.</div>
+        </div>
+      {/if}
+    </div>
+  {:else if currentUser && viewMode === 'library'}
     <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
       {#if essaysLoading && !essaysLoadedOnce}
         <div class="pub-empty">Loading your writings…</div>
