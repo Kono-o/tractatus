@@ -1,10 +1,9 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { db, supabase, type Essay, estimateReadTimeMinutes } from '$lib/db';
+  import { db, type Essay, estimateReadTimeMinutes } from '$lib/db';
   import { renderEssay } from '$lib/markdown';
   import GeneratedAvatar from '$lib/components/GeneratedAvatar.svelte';
   import { Eye, EyeClosed, ArrowLeft, User, Link } from '@lucide/svelte';
-  import type { User as SupabaseUser } from '@supabase/supabase-js';
 
   let username = $derived($page.params.username);
   let slug = $derived($page.params.slug);
@@ -12,19 +11,19 @@
   let essay = $state<Essay | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let logoEyeOpen = $state(false);
+  import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
 
-  let currentUser = $state<SupabaseUser | null>(null);
-  let avatarSeed = $state<string | null>(null);
-  let avatarUrl = $state<string | null>(null);
+  let logoEyeOpen = $state(
+    typeof localStorage !== 'undefined' && localStorage.getItem('logoEyeOpen') === 'true'
+  );
+
+  let linkCopied = $state(false);
+  let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   function goBack() {
     if (history.length > 1) history.back();
     else window.location.href = '/';
   }
-
-  let linkCopied = $state(false);
-  let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   function copyLink() {
     void navigator.clipboard.writeText(window.location.href);
@@ -35,7 +34,30 @@
 
   function toggleLogoEye() {
     logoEyeOpen = !logoEyeOpen;
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.setItem('logoEyeOpen', String(logoEyeOpen)); } catch {}
+    }
   }
+
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+    try {
+      const html = document.documentElement;
+      const isDark = !logoEyeOpen;
+      html.classList.toggle('dark', isDark);
+      html.classList.add('theme-transitioning');
+      setTimeout(() => html.classList.remove('theme-transitioning'), 250);
+      _setAppIcon(isDark ? 'dark' : 'light');
+    } catch (e) {
+      console.warn('[logoEye] failed to apply theme class', e);
+    }
+  });
+
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    window.addEventListener('popstate', goBack);
+    return () => window.removeEventListener('popstate', goBack);
+  });
 
   function countWords(s: string): number {
     return (s || '').trim().split(/\s+/).filter(Boolean).length;
@@ -65,20 +87,8 @@
     }
   }
 
-  async function loadUser() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      currentUser = user;
-      try {
-        avatarSeed = await db.getAvatarSeed();
-        avatarUrl = await db.getAvatarUrl();
-      } catch { /* ignore */ }
-    }
-  }
-
   $effect(() => {
     if (slug && username) void load();
-    if (typeof window !== 'undefined') void loadUser();
   });
 </script>
 
@@ -87,7 +97,7 @@
 </svelte:head>
 
 <div class="app app--pub w-full h-dvh max-h-dvh overflow-hidden select-none flex flex-col font-sans">
-  <div class="pub-shell flex flex-col flex-1 min-h-0 w-full overflow-hidden">
+  <div class="pub-shell flex flex-col flex-1 min-h-0 w-full" style="overflow: hidden;">
     <div class="pub-header-wrap">
       <header class="pub-header pub-header--article">
         <div class="pub-header-start">
@@ -107,19 +117,7 @@
             <span class="pub-header-logo-text">Tractatus</span>
           </div>
         </div>
-        <div class="pub-header-actions">
-            {#if currentUser}
-              <button type="button" onclick={goBack} class="pub-header-icon-btn pub-header-avatar" aria-label="Account and settings">
-                {#key avatarSeed + '' + avatarUrl}
-                  <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={28} rounded={20} />
-                {/key}
-              </button>
-            {:else}
-              <button type="button" onclick={goBack} class="pub-header-icon-btn pub-header-guest-btn" aria-label="Sign in or sign up">
-                <User class="size-3.5" aria-hidden="true" />
-              </button>
-            {/if}
-        </div>
+        <div class="pub-header-actions"></div>
       </header>
       <div class="pub-header-sub">
         <button type="button" onclick={goBack} class="pub-header-back-btn">
@@ -128,50 +126,52 @@
         </button>
       </div>
     </div>
-    <div class="pub-body flex flex-col flex-1 min-h-0 overflow-y-auto">
-      <div class="mode-panel">
+    <div class="flex flex-col flex-1 min-h-0 h-0 overflow-y-auto scrollbar-none" style="scrollbar-width: none; -ms-overflow-style: none;">
+      <div class="pub-article">
         {#if loading}
           <div class="pub-empty">Loading article…</div>
         {:else if error}
           <div class="pub-empty">
             <div class="pub-empty-title">{error}</div>
-              <button type="button" onclick={goBack} class="pub-article-back-link">← Back to feed</button>
+            <button type="button" onclick={goBack} class="pub-article-back-link">← Back to feed</button>
           </div>
         {:else if essay}
-          <article class="pub-article">
-            <div class="flex items-start justify-between gap-2">
-              <h1 class="pub-article-title flex-1 min-w-0">{essay.title || 'Untitled'}</h1>
-              <button type="button" onclick={copyLink} class="mt-1 shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors p-1.5 relative" aria-label="Copy link">
-                {#if linkCopied}
-                  <span class="absolute right-full mr-2 top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300">Copied!</span>
-                {/if}
-                <Link class="size-4" aria-hidden="true" />
-              </button>
-            </div>
-            <div class="pub-article-byline">
-              {#key essay.author_avatar_seed + '' + essay.author_avatar_url}
-                <div class="pub-author-avatar">
-                  <GeneratedAvatar
-                    userId={essay.user_id}
-                    seed={essay.author_avatar_seed}
-                    avatarUrl={essay.author_avatar_url}
-                    size={24}
-                    rounded={20}
-                  />
-                </div>
-              {/key}
-              <span class="pub-author-meta">
-                {essay.author_username || 'Anonymous'} &nbsp;·&nbsp;
-                {new Date(essay.published_at || essay.updated_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} &nbsp;·&nbsp;
-                {countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}
-              </span>
-            </div>
-            <div class="pub-article-prose reader-prose markdown-content">
-              {@html renderEssay(essay.content)}
-            </div>
-          </article>
+          <div class="flex items-start justify-between gap-2">
+            <h1 class="pub-article-title flex-1 min-w-0">{essay.title || 'Untitled'}</h1>
+            <button type="button" onclick={copyLink} class="mt-1 shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors p-1.5 relative" aria-label="Copy link">
+              {#if linkCopied}
+                <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
+              {/if}
+              <Link class="size-4" aria-hidden="true" />
+            </button>
+          </div>
+          <div class="pub-article-byline">
+            {#key essay.author_avatar_seed + '' + essay.author_avatar_url}
+              <div class="pub-author-avatar">
+                <GeneratedAvatar
+                  userId={essay.user_id}
+                  seed={essay.author_avatar_seed}
+                  avatarUrl={essay.author_avatar_url}
+                  size={24}
+                  rounded={20}
+                />
+              </div>
+            {/key}
+            <span class="pub-author-meta">
+              {essay.author_username || 'Anonymous'} &nbsp;·&nbsp;
+              {new Date(essay.published_at || essay.updated_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} &nbsp;·&nbsp;
+              {countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}
+            </span>
+          </div>
+          <div class="pub-article-prose reader-prose markdown-content">
+            {@html renderEssay(essay.content)}
+          </div>
         {/if}
       </div>
     </div>
   </div>
 </div>
+
+<style>
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+</style>

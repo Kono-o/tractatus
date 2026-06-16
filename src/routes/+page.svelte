@@ -170,10 +170,12 @@
     try {
       if (essay.content?.trim()) {
         readingEssay = essay;
-      } else {
-        const full = await db.getPublicEssayBySlug(essay.slug);
+      } else if (uname) {
+        const full = await db.getPublicEssayByUsernameAndSlug(uname, essay.slug);
         if (!full) readingEssayError = 'This essay is not public or does not exist.';
         else readingEssay = full;
+      } else {
+        readingEssayError = 'This essay is not public or does not exist.';
       }
     } catch (e) {
       console.warn('[article] load failed', e);
@@ -2515,7 +2517,7 @@
   <div class="pub-shell flex flex-col flex-1 min-h-0 w-full overflow-hidden">
     {@render compactHeader(isWriting, !!readingEssay)}
 
-    <div class="pub-body flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div class="pub-body flex flex-col flex-1 min-h-0" style={readingEssay ? 'overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;' : undefined}>
   <div class="mode-panel">
   {#if currentUser && isWriting}
     <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
