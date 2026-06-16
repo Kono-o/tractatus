@@ -719,7 +719,9 @@
     }
 
     const onPopState = () => {
-      if (readingEssay && window.location.pathname === '/') {
+      if (isWriting && window.location.pathname === '/') {
+        void exitWriting();
+      } else if (readingEssay && window.location.pathname === '/') {
         closeArticle();
       }
     };
@@ -1801,7 +1803,7 @@
     lastSavedAt = Date.now();
     // Seed one history entry
     undoStack = [{ title: essay.title, content: essay.content, slug: essay.slug }];
-    // focus title or content next tick (in markup we can use autofocus on enter)
+    history.pushState(null, '', '/');
   }
 
   async function enterNewWrite() {
@@ -1809,6 +1811,7 @@
     closeArticle();
     resetEditor();
     isWriting = true;
+    history.pushState(null, '', '/');
     editorTitle = '';
     editorContent = '';
     editorSlug = '';
