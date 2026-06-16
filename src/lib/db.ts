@@ -416,6 +416,7 @@ export interface Essay {
 	published_at: string | null;
 	author_username?: string;
 	author_avatar_seed?: string | null;
+	author_avatar_url?: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -423,6 +424,7 @@ export interface Essay {
 export interface EssayWithAuthor extends Essay {
 	author_username: string;
 	author_avatar_seed: string | null;
+	author_avatar_url: string | null;
 }
 
 export function slugifyTitle(title: string): string {
@@ -552,6 +554,17 @@ export const db = {
 
 	async saveAvatarSeed(seed: string | null): Promise<void> {
 		const { error } = await supabase.rpc("save_avatar_seed", { p_seed: seed });
+		if (error) throw error;
+	},
+
+	async getAvatarUrl(): Promise<string | null> {
+		const { data, error } = await supabase.rpc("get_avatar_url");
+		if (error) throw error;
+		return data ?? null;
+	},
+
+	async saveAvatarUrl(url: string | null): Promise<void> {
+		const { error } = await supabase.rpc("save_avatar_url", { p_url: url });
 		if (error) throw error;
 	},
 
@@ -823,7 +836,7 @@ async function attachAuthors(essays: Essay[]): Promise<void> {
 	if (!ids.length) return;
 	const { data: authors } = await supabase
 		.from('usernames')
-		.select('user_id, username, avatar_seed')
+		.select('user_id, username, avatar_seed, avatar_url')
 		.in('user_id', ids);
 	if (!authors) return;
 	const map = new Map(authors.map((a) => [a.user_id, a]));
@@ -832,6 +845,7 @@ async function attachAuthors(essays: Essay[]): Promise<void> {
 		if (a) {
 			(e as unknown as Record<string, unknown>).author_username = a.username;
 			(e as unknown as Record<string, unknown>).author_avatar_seed = a.avatar_seed;
+			(e as unknown as Record<string, unknown>).author_avatar_url = a.avatar_url;
 		}
 	}
 }
@@ -840,4 +854,5 @@ async function attachAuthors(essays: Essay[]): Promise<void> {
 export interface UserProfile {
 	username: string;
 	avatar_seed?: string | null;
+	avatar_url?: string | null;
 }

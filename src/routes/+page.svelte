@@ -208,6 +208,9 @@
   let supabasePanelLoading = $state(false);
   let avatarSeed = $state<string | null>(null);
   let avatarShuffleCooldown = $state(false);
+  let avatarUrl = $state<string | null>(null);
+  let avatarUploading = $state(false);
+  let avatarDeleteConfirm = $state(false);
 
   let accountBusy = $state(false);
   let accountError = $state<string | null>(null);
@@ -580,7 +583,7 @@
     }
     try {
       bootMessage = 'Syncing backend…';
-      await Promise.all([loadAvatarSeed(), preloadSupabaseBackend()]);
+      await Promise.all([loadAvatarSeed(), loadAvatarUrl(), preloadSupabaseBackend()]);
       if (isInitial) bootMessage = 'Almost ready…';
     } catch (e) {
       console.error(e);
@@ -971,6 +974,84 @@
     }, 50);
   }
 
+  async function loadAvatarUrl() {
+    if (!currentUser) {
+      avatarUrl = null;
+      return;
+    }
+    try {
+      avatarUrl = await db.getAvatarUrl();
+    } catch {
+      avatarUrl = null;
+    }
+  }
+
+  let avatarFileInput: HTMLInputElement | undefined = $state();
+
+  function triggerAvatarUpload() {
+    avatarFileInput?.click();
+  }
+
+  async function handleAvatarFileChange(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif'].includes(file.type)) {
+      accountError = 'Please select a JPEG, PNG, WebP, AVIF, or GIF file.';
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      accountError = 'File too large. Maximum 2 MB.';
+      return;
+    }
+    avatarUploading = true;
+    accountError = null;
+    try {
+      const formData = new FormData();
+      formData.append('avatar', file);
+      const res = await fetch('/api/avatar/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` },
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || 'Upload failed');
+      }
+      const { url } = await res.json();
+      await db.saveAvatarUrl(url);
+      avatarUrl = url;
+    } catch (e: any) {
+      accountError = e?.message || 'Upload failed.';
+    } finally {
+      avatarUploading = false;
+      input.value = '';
+    }
+  }
+
+  async function handleAvatarRemove() {
+    if (!currentUser) return;
+    avatarUploading = true;
+    accountError = null;
+    try {
+      const res = await fetch('/api/avatar/delete', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || 'Delete failed');
+      }
+      await db.saveAvatarUrl(null);
+      avatarUrl = null;
+      avatarDeleteConfirm = false;
+    } catch (e: any) {
+      accountError = e?.message || 'Remove failed.';
+    } finally {
+      avatarUploading = false;
+    }
+  }
+
   async function preloadSupabaseBackend() {
     const showLoading = supabasePanel === null;
     if (showLoading) supabasePanelLoading = true;
@@ -1005,7 +1086,10 @@
     if (!supabasePanel) {
       void refreshSupabasePanel();
     }
-    if (currentUser) void loadAvatarSeed();
+    if (currentUser) {
+      void loadAvatarSeed();
+      void loadAvatarUrl();
+    }
   }
 
   function closeSettingsPanel() {
@@ -1139,6 +1223,7 @@
     holdCautionMorphFade = true;
     resetChangePasswordForm();
     accountError = null;
+    avatarDeleteConfirm = false;
   }
 
   function pulseSignOutTapFlash() {
@@ -1332,12 +1417,14 @@
     showPostUpdate = true;
   }
 
-  // Load avatar seed when user signs in
+  // Load avatar data when user signs in
   $effect(() => {
     if (currentUser) {
       void loadAvatarSeed();
+      void loadAvatarUrl();
     } else {
       avatarSeed = null;
+      avatarUrl = null;
     }
   });
 
@@ -2083,10 +2170,10 @@
             onclick={openSettingsPanel}
             aria-label="Account and settings"
           >
-            {#key avatarSeed}
-              <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} size={28} rounded={0} />
-            {/key}
-          </button>
+          {#key avatarSeed + '' + avatarUrl}
+            <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={28} rounded={0} />
+          {/key}
+        </button>
         {:else}
           <button
             type="button"
@@ -2147,11 +2234,12 @@
   >
     <div class="pub-feed-card-meta">
       <span class="pub-feed-card-meta-left">
-        {#key essay.author_avatar_seed}
+        {#key essay.author_avatar_seed + '' + essay.author_avatar_url}
           <span class="pub-feed-card-avatar">
             <GeneratedAvatar
               userId={essay.user_id}
               seed={essay.author_avatar_seed}
+              avatarUrl={essay.author_avatar_url}
               size={featured ? 24 : 20}
               rounded={0}
             />
@@ -2242,8 +2330,8 @@
     <div class="settings-panel-body text-[10px] leading-snug">
       {#if bootAccountReveal && currentUser && panel}
         <div class="flex justify-center py-1 boot-panel-reveal-item boot-panel-reveal-item--avatar">
-          {#key avatarSeed}
-            <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} size={80} />
+          {#key avatarSeed + '' + avatarUrl}
+            <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={80} />
           {/key}
         </div>
 
@@ -2515,11 +2603,12 @@
         <article class="pub-article">
           <h1 class="pub-article-title">{readingEssay.title || 'Untitled'}</h1>
           <div class="pub-article-byline">
-            {#key readingEssay.author_avatar_seed}
+            {#key readingEssay.author_avatar_seed + '' + readingEssay.author_avatar_url}
               <div class="pub-author-avatar">
                 <GeneratedAvatar
                   userId={readingEssay.user_id}
                   seed={readingEssay.author_avatar_seed}
+                  avatarUrl={readingEssay.author_avatar_url}
                   size={24}
                   rounded={0}
                 />
@@ -2712,19 +2801,67 @@
 
       <div class="settings-panel-body text-[10px] leading-snug">
         {#if currentUser}
-          <div class="flex justify-center py-1">
-            <button
-              type="button"
-              onclick={shuffleAvatarSeed}
-              disabled={avatarShuffleCooldown}
-              class="cursor-pointer hover:opacity-90 active:scale-[0.96] transition-all focus:outline-none {avatarShuffleCooldown ? 'opacity-60 cursor-default' : ''}"
-              title="Click to shuffle to a new random identicon seed (saved)"
-            >
-              {#key avatarSeed}
-                <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} size={80} />
-              {/key}
-            </button>
+          <div class="flex flex-col items-center gap-1.5 py-1">
+            {#if avatarUrl}
+              <button
+                type="button"
+                onclick={shuffleAvatarSeed}
+                disabled={avatarShuffleCooldown || !!avatarUrl}
+                class="cursor-default {avatarShuffleCooldown ? 'opacity-60 cursor-default' : ''}"
+              >
+                {#key avatarSeed + '' + avatarUrl}
+                  <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={80} />
+                {/key}
+              </button>
+            {:else}
+              <button
+                type="button"
+                onclick={shuffleAvatarSeed}
+                disabled={avatarShuffleCooldown}
+                class="cursor-pointer hover:opacity-90 active:scale-[0.96] transition-all focus:outline-none {avatarShuffleCooldown ? 'opacity-60 cursor-default' : ''}"
+                title="Click to shuffle to a new random identicon seed (saved)"
+              >
+                {#key avatarSeed + '' + avatarUrl}
+                  <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={80} />
+                {/key}
+              </button>
+            {/if}
+            <div class="flex items-center gap-2">
+              {#if avatarUrl}
+                <button
+                  type="button"
+                  class="text-[10px] px-2 py-0.5 rounded border border-rose-400/40 text-rose-500 hover:bg-rose-500/10 transition-colors"
+                  disabled={avatarUploading}
+                  onclick={() => {
+                    if (avatarDeleteConfirm) {
+                      void handleAvatarRemove();
+                    } else {
+                      avatarDeleteConfirm = true;
+                    }
+                  }}
+                  onblur={() => { avatarDeleteConfirm = false; }}
+                >
+                  {avatarUploading ? 'Removing…' : avatarDeleteConfirm ? 'Sure?' : 'Remove photo'}
+                </button>
+              {:else}
+                <button
+                  type="button"
+                  class="text-[10px] px-2 py-0.5 rounded border border-zinc-500/30 text-zinc-500 hover:bg-zinc-500/10 transition-colors"
+                  disabled={avatarUploading}
+                  onclick={triggerAvatarUpload}
+                >
+                  {avatarUploading ? 'Uploading…' : 'Upload photo'}
+                </button>
+              {/if}
+            </div>
           </div>
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/avif,image/gif"
+            bind:this={avatarFileInput}
+            class="hidden"
+            onchange={handleAvatarFileChange}
+          />
         {/if}
         <div class="settings-panel-stats">
           {#if supabasePanelLoading && !supabasePanel}

@@ -1,11 +1,14 @@
 <script lang="ts">
-  let { userId = '', size = 32, className = '', rounded = 8, seed } = $props<{
+  let { userId = '', size = 32, className = '', rounded = 8, seed, avatarUrl } = $props<{
     userId?: string;
     size?: number;
     className?: string;
     rounded?: number;
     seed?: string | null;
+    avatarUrl?: string | null;
   }>();
+
+  let imgError = $state(false);
 
   const borderRadius = $derived(`${(rounded / 100) * size}px`);
 
@@ -73,24 +76,37 @@
   });
 </script>
 
-<svg
-  width={size}
-  height={size}
-  viewBox="0 0 100 100"
-  class={`generated-avatar overflow-hidden ${className}`}
-  style={`border-radius: ${borderRadius};`}
-  aria-hidden="true"
->
-  <rect x="0" y="0" width="100" height="100" fill={avatarData.bgColor} rx={rounded} />
+{#if avatarUrl && !imgError}
+  <img
+    src={avatarUrl}
+    width={size}
+    height={size}
+    class={`generated-avatar overflow-hidden ${className}`}
+    style={`border-radius: ${borderRadius}; object-fit: cover;`}
+    alt=""
+    loading="lazy"
+    onerror={() => { imgError = true; }}
+  />
+{:else}
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 100 100"
+    class={`generated-avatar overflow-hidden ${className}`}
+    style={`border-radius: ${borderRadius};`}
+    aria-hidden="true"
+  >
+    <rect x="0" y="0" width="100" height="100" fill={avatarData.bgColor} rx={rounded} />
 
-  {#each avatarData.cells as cell (cell.x + '-' + cell.y)}
-    <rect
-      x={cell.x * cellSize + 2}
-      y={cell.y * cellSize + 2}
-      width={cellSize - 4}
-      height={cellSize - 4}
-      fill={avatarData.cellColor}
-      rx="2"
-    />
-  {/each}
-</svg>
+    {#each avatarData.cells as cell (cell.x + '-' + cell.y)}
+      <rect
+        x={cell.x * cellSize + 2}
+        y={cell.y * cellSize + 2}
+        width={cellSize - 4}
+        height={cellSize - 4}
+        fill={avatarData.cellColor}
+        rx="2"
+      />
+    {/each}
+  </svg>
+{/if}
