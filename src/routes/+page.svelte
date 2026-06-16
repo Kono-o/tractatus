@@ -2174,6 +2174,10 @@
             class="pub-header-logo-text"
             class:pub-header-logo-text--hidden={searchExpanded && !articleMode && !writingMode}
             aria-hidden={searchExpanded && !writingMode && !articleMode || undefined}
+            role="button"
+            tabindex="0"
+            onclick={() => { if (writingMode) { void exitWriting(); } else if (articleMode) { closeArticle(); } }}
+            onkeydown={(e) => { if (e.key === 'Enter') { if (writingMode) { void exitWriting(); } else if (articleMode) { closeArticle(); } } }}
           >Tractatus</span>
         </div>
       </div>

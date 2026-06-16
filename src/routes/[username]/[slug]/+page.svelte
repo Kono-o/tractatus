@@ -114,7 +114,7 @@
                 <EyeClosed class="pub-header-logo-icon" aria-hidden="true" />
               {/if}
             </button>
-            <span class="pub-header-logo-text">Tractatus</span>
+            <span class="pub-header-logo-text" role="button" tabindex="0" onclick={goBack} onkeydown={(e) => { if (e.key === 'Enter') goBack(); }}>Tractatus</span>
           </div>
         </div>
         <div class="pub-header-actions"></div>
