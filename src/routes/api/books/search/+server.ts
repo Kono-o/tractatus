@@ -27,19 +27,31 @@ export const GET: RequestHandler = async ({ url, request }) => {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), 10000);
 
-  const res = await fetch(
-    `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=8&fields=key,title,author_name,cover_i,first_publish_year`,
-    { headers: { 'User-Agent': 'Tractatus/1.0' }, signal: controller.signal },
-  );
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=8&fields=key,title,author_name,cover_i,first_publish_year`,
+      { headers: { 'User-Agent': 'Tractatus/1.0' }, signal: controller.signal },
+    );
+  } catch {
+    clearTimeout(timeout);
+    throw error(504, 'OpenLibrary search timed out. Try again.');
+  }
   clearTimeout(timeout);
 
   if (!res.ok) {
     throw error(502, 'OpenLibrary search failed');
   }
 
-  const data = await res.json() as { docs: OLDoc[] };
+  let data: { docs?: OLDoc[] };
+  try {
+    data = await res.json();
+  } catch {
+    throw error(502, 'OpenLibrary returned invalid data');
+  }
+
   const results = (data.docs ?? []).map((doc) => ({
     id: doc.key,
     title: doc.title || 'Untitled',
