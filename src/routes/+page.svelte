@@ -382,6 +382,7 @@
   let feedTouchStartY = $state(0);
   let feedTouchId = $state<number | null>(null);
   let searchQuery = $state('');
+  let searchQueryError = $state<string | null>(null);
   // Deduping guard: timestamp of last feed refresh (ms)
   let lastFeedRefreshAt = $state<number | null>(null);
   const FEED_REFRESH_DEDUP_MS = 800; // ignore refreshes within 800ms of previous one
@@ -419,19 +420,27 @@
 
   let isFeedSearching = $derived(searchQuery.trim().length > 0 && viewMode === 'feed');
 
+  let feedSearchThrottleLast = 0;
+
   async function runFeedSearch(query: string) {
     const term = query.trim();
-    if (!term) {
+    searchQueryError = null;
+    if (!term || term.length < 2) {
       searchResults = [];
       searchLoading = false;
       return;
     }
+    if (term.length > 100) return;
+    const now = Date.now();
+    if (now - feedSearchThrottleLast < 1000) return;
+    feedSearchThrottleLast = now;
     searchLoading = true;
     try {
       searchResults = await db.searchPublicEssays(term);
     } catch (e) {
       console.warn('[feed] search failed', e);
       searchResults = [];
+      searchQueryError = (e as Error)?.message || 'Search failed.';
     } finally {
       searchLoading = false;
     }
@@ -439,6 +448,7 @@
 
   function onSearchInput(value: string) {
     searchQuery = value;
+    searchQueryError = null;
     if (viewMode === 'library') {
       librarySearchQuery = value;
       return;
@@ -1692,13 +1702,30 @@
     await saveCurrent(false); // private
   }
 
+  let saveThrottleLast = 0;
+
   async function saveCurrent(forcePublic: boolean) {
     if (isSaving) return;
+    const now = Date.now();
+    if (now - saveThrottleLast < 2000) return;
+    saveThrottleLast = now;
     const title = (editorTitle || 'Untitled').trim();
     if (!title && !editorContent.trim()) {
       saveError = 'Add a title or some text first.';
       return;
     }
+    const wordCount = editorContent.trim() ? editorContent.trim().split(/\s+/).length : 0;
+    if (wordCount > 50000) {
+      saveError = 'Essay exceeds 50,000 word limit.';
+      isSaving = false;
+      return;
+    }
+    if (new TextEncoder().encode(editorContent).length > 1_048_576) {
+      saveError = 'Essay content exceeds 1 MB size limit.';
+      isSaving = false;
+      return;
+    }
+
     saveError = null;
     isSaving = true;
 
@@ -2717,6 +2744,10 @@
       {:else if isFeedSearching}
         {#if searchLoading}
           <div class="pub-empty">Searching…</div>
+        {:else if searchQueryError}
+          <div class="pub-empty pub-empty--search">
+            <div class="pub-empty-title">{searchQueryError}</div>
+          </div>
         {:else if searchResults.length === 0}
           <div class="pub-empty pub-empty--search">
             <div class="pub-empty-title">No essays match "{searchQuery.trim()}".</div>

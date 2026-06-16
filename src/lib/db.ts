@@ -11,6 +11,21 @@ const supabaseAnonKey = PUBLIC_SUPABASE_ANON_KEY.trim();
 export const isSupabaseConfigured =
 	supabaseUrl.length > 0 && supabaseAnonKey.length > 0;
 
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+function checkClientRateLimit(name: string, key: string, maxRequests: number, windowMs: number): boolean {
+	const storeKey = `${name}:${key}`;
+	const now = Date.now();
+	const entry = rateLimitStore.get(storeKey);
+	if (!entry || now >= entry.resetAt) {
+		rateLimitStore.set(storeKey, { count: 1, resetAt: now + windowMs });
+		return true;
+	}
+	if (entry.count >= maxRequests) return false;
+	entry.count += 1;
+	return true;
+}
+
 // createClient throws on empty url; placeholder keeps SSR alive until env is set on Vercel.
 export const supabase = createClient(
 	isSupabaseConfigured ? supabaseUrl : "https://placeholder.supabase.co",
@@ -483,6 +498,9 @@ export const db = {
 	},
 
 	async isUsernameAvailable(username: string): Promise<boolean> {
+		if (!checkClientRateLimit('check-username', username, 30, 60_000)) {
+			return false;
+		}
 		const validationError = validateUsername(username);
 		if (validationError) return false;
 
@@ -504,6 +522,9 @@ export const db = {
 	},
 
 	async registerUsername(username: string): Promise<void> {
+		if (!checkClientRateLimit('register-username', username, 5, 3600_000)) {
+			throw new Error('Too many username registration attempts. Try again later.');
+		}
 		const normalized = normalizeUsername(username);
 		const { error } = await supabase.rpc("register_username", {
 			p_username: normalized,
@@ -512,6 +533,9 @@ export const db = {
 	},
 
 	async renameUsername(newUsername: string): Promise<User> {
+		if (!checkClientRateLimit('rename-username', (await supabase.auth.getUser()).data.user?.id ?? '', 3, 86_400_000)) {
+			throw new Error('Too many username changes. Try again later.');
+		}
 		const validationError = validateUsername(newUsername);
 		if (validationError) throw new Error(validationError);
 
@@ -553,6 +577,10 @@ export const db = {
 	},
 
 	async saveAvatarSeed(seed: string | null): Promise<void> {
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!checkClientRateLimit('save-avatar-seed', user?.id ?? 'anon', 30, 60_000)) {
+			throw new Error('Too many requests. Try again later.');
+		}
 		const { error } = await supabase.rpc("save_avatar_seed", { p_seed: seed });
 		if (error) throw error;
 	},
@@ -564,11 +592,18 @@ export const db = {
 	},
 
 	async saveAvatarUrl(url: string | null): Promise<void> {
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!checkClientRateLimit('save-avatar-url', user?.id ?? 'anon', 10, 60_000)) {
+			throw new Error('Too many requests. Try again later.');
+		}
 		const { error } = await supabase.rpc("save_avatar_url", { p_url: url });
 		if (error) throw error;
 	},
 
 	async signUpWithUsername(username: string, password: string) {
+		if (!checkClientRateLimit('signup', username, 3, 3600_000)) {
+			throw new Error('Too many sign-up attempts. Try again later.');
+		}
 		const validationError = validateUsername(username);
 		if (validationError) throw new Error(validationError);
 
@@ -601,6 +636,9 @@ export const db = {
 	},
 
 	async signInWithUsername(username: string, password: string) {
+		if (!checkClientRateLimit('signin', username, 10, 60_000)) {
+			throw new Error('Too many sign-in attempts. Try again later.');
+		}
 		const validationError = validateUsername(username);
 		if (validationError) throw new Error(validationError);
 
@@ -743,10 +781,23 @@ export const db = {
 		const uid = user?.id;
 		if (!uid) throw new Error('Not authenticated');
 
+		if (!checkClientRateLimit('save-essay', uid, 30, 60_000)) {
+			throw new Error('Too many saves. Try again later.');
+		}
+
+		const content = params.content ?? '';
+		const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+		if (wordCount > 50000) {
+			throw new Error('Essay exceeds 50,000 word limit');
+		}
+		if (new TextEncoder().encode(content).length > 1_048_576) {
+			throw new Error('Essay content exceeds 1 MB size limit');
+		}
+
 		const now = new Date().toISOString();
 		const payload: any = {
 			title: (params.title || 'Untitled').trim().slice(0, 200),
-			content: params.content ?? '',
+			content: content,
 			slug: params.slug,
 			is_public: !!params.is_public,
 			is_published: !!params.is_public,
@@ -767,6 +818,13 @@ export const db = {
 			if (error) throw error;
 			return data as Essay;
 		} else {
+			const { count, error: countErr } = await supabase
+				.from('essays')
+				.select('*', { count: 'exact', head: true })
+				.eq('user_id', uid);
+			if (!countErr && count !== null && count >= 500) {
+				throw new Error('Essay limit reached (max 500 essays per user)');
+			}
 			payload.user_id = uid;
 			payload.created_at = now;
 			const { data, error } = await supabase
@@ -780,6 +838,11 @@ export const db = {
 	},
 
 	async deleteEssay(id: string): Promise<void> {
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!user) throw new Error('Not authenticated');
+		if (!checkClientRateLimit('delete-essay', user.id, 10, 60_000)) {
+			throw new Error('Too many deletes. Try again later.');
+		}
 		const { error } = await supabase.from('essays').delete().eq('id', id);
 		if (error) throw error;
 	},
@@ -818,8 +881,15 @@ export const db = {
 
 	/** Search all public essays (includes the current user's published work). */
 	async searchPublicEssays(query: string, limit = 50): Promise<Essay[]> {
+		if (!checkClientRateLimit('search', 'global', 10, 60_000)) {
+			throw new Error('Too many searches. Try again later.');
+		}
 		const term = query.trim();
 		if (!term) return [];
+		if (term.length < 2) return [];
+		if (term.length > 100) throw new Error('Search query too long (max 100 characters)');
+
+		const safeLimit = Math.min(limit, 100);
 
 		const escaped = term.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 		const pattern = `%${escaped}%`;
@@ -831,7 +901,7 @@ export const db = {
 			.or(`title.ilike.${pattern},content.ilike.${pattern}`)
 			.order('published_at', { ascending: false, nullsFirst: false })
 			.order('updated_at', { ascending: false })
-			.limit(limit);
+			.limit(safeLimit);
 
 		if (error) throw error;
 		const essays = (data ?? []) as Essay[];

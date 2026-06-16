@@ -12,6 +12,7 @@ import {
 } from '$env/static/private';
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { checkRateLimit } from '$lib/rateLimit';
 
 let s3Client: S3Client | null = null;
 function getS3(): S3Client {
@@ -45,6 +46,11 @@ export const DELETE: RequestHandler = async ({ request }) => {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) {
     throw error(401, 'Not authenticated');
+  }
+
+  const rl = checkRateLimit('avatar-delete', user.id, 10, 3600_000);
+  if (!rl.allowed) {
+    throw error(429, 'Too many requests. Try again later.');
   }
 
   // Delete any avatar object for this user regardless of extension

@@ -13,6 +13,7 @@ import {
 } from '$env/static/private';
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { checkRateLimit } from '$lib/rateLimit';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif'];
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -49,6 +50,11 @@ export const POST: RequestHandler = async ({ request }) => {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) {
     throw error(401, 'Not authenticated');
+  }
+
+  const rl = checkRateLimit('avatar-upload', user.id, 5, 3600_000);
+  if (!rl.allowed) {
+    throw error(429, 'Too many uploads. Try again later.');
   }
 
   const formData = await request.formData();
