@@ -784,12 +784,36 @@ export const db = {
 		if (error) throw error;
 	},
 
-	async isSlugAvailable(slug: string, excludeId?: string | null): Promise<boolean> {
+	async isSlugAvailable(slug: string, excludeId?: string | null, userId?: string | null): Promise<boolean> {
 		let q = supabase.from('essays').select('id', { count: 'exact', head: true }).eq('slug', slug);
 		if (excludeId) q = q.neq('id', excludeId);
+		if (userId) q = q.eq('user_id', userId);
 		const { count, error } = await q;
 		if (error) throw error;
 		return (count ?? 0) === 0;
+	},
+
+	async getPublicEssayByUsernameAndSlug(username: string, slug: string): Promise<Essay | null> {
+		const { data: user } = await supabase
+			.from('usernames')
+			.select('user_id')
+			.eq('username', username)
+			.single();
+		if (!user) return null;
+		const { data, error } = await supabase
+			.from('essays')
+			.select('*')
+			.eq('slug', slug)
+			.eq('user_id', user.user_id)
+			.eq('is_public', true)
+			.single();
+		if (error) {
+			if ((error as any).code === 'PGRST116') return null;
+			throw error;
+		}
+		const essay = data as Essay;
+		await attachAuthors([essay]);
+		return essay;
 	},
 
 	/** Search all public essays (includes the current user's published work). */

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { fly } from 'svelte/transition';
+  import { goto } from '$app/navigation';
   import GeneratedAvatar from '$lib/components/GeneratedAvatar.svelte';
   import {
     db,
@@ -116,11 +117,16 @@
   let readingEssay = $state<Essay | null>(null);
   let readingEssayLoading = $state(false);
   let readingEssayError = $state<string | null>(null);
+  let linkCopied = $state(false);
+  let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
+  let feedLinkCopiedId = $state<string | null>(null);
+  let feedLinkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   function closeArticle() {
     readingEssay = null;
     readingEssayError = null;
     readingEssayLoading = false;
+    if (window.location.pathname !== '/') history.pushState(null, '', '/');
   }
 
   // Click handler for rendered article HTML. Delegates copy-button clicks and anchors.
@@ -154,6 +160,8 @@
   }
 
   async function openArticle(essay: Essay) {
+    const uname = essay.author_username;
+    if (!uname) return;
     viewMode = 'feed';
     if (searchExpanded) await toggleSearch();
     readingEssayLoading = true;
@@ -173,11 +181,13 @@
     } finally {
       readingEssayLoading = false;
     }
+    history.pushState(null, '', `/${encodeURIComponent(uname)}/${encodeURIComponent(essay.slug)}/`);
   }
 
   function handleHeaderBack() {
     if (isWriting) void exitWriting();
-    else closeArticle();
+    else if (readingEssay) closeArticle();
+    else void goto('/');
   }
 
 
@@ -706,8 +716,16 @@
       })();
     }
 
+    const onPopState = () => {
+      if (readingEssay && window.location.pathname === '/') {
+        closeArticle();
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+
     return () => {
       subscription.unsubscribe();
+      window.removeEventListener('popstate', onPopState);
     };
   });
 
@@ -1643,10 +1661,10 @@
     editorSlug = slugifyTitle(editorTitle);
   }
 
-  async function ensureUniqueSlug(slug: string, excludeId: string | null): Promise<string> {
+  async function ensureUniqueSlug(slug: string, excludeId: string | null, userId?: string | null): Promise<string> {
     let candidate = slug || 'untitled';
     let suffix = 2;
-    while (!(await db.isSlugAvailable(candidate, excludeId))) {
+    while (!(await db.isSlugAvailable(candidate, excludeId, userId))) {
       candidate = `${slug}-${suffix}`;
       suffix += 1;
       if (suffix > 99) break; // safety
@@ -1684,7 +1702,7 @@
     const exclude = currentEssayId;
 
     try {
-      targetSlug = await ensureUniqueSlug(targetSlug, exclude);
+      targetSlug = await ensureUniqueSlug(targetSlug, exclude, currentUser?.id);
 
       const saved = await db.saveEssay({
         id: currentEssayId,
@@ -2268,7 +2286,7 @@
   <div
     class="pub-feed-card"
     class:pub-feed-card--featured={featured}
-    onclick={() => void openArticle(essay)}
+    onclick={(e) => { if ((e.target as HTMLElement).closest('button')) return; void openArticle(essay); }}
     role="button"
     tabindex="0"
     onkeydown={(e) => { if (e.key === 'Enter') void openArticle(essay); }}
@@ -2294,6 +2312,14 @@
       </span>
       <span class="pub-feed-card-meta-right">
         <span class="pub-feed-card-readtime">{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
+        <span class="relative inline-flex items-center">
+          <button type="button" onclick={(e) => { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username || '')}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
+            {#if feedLinkCopiedId === essay.id}
+              <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
+            {/if}
+            <Link class="size-4" aria-hidden="true" />
+          </button>
+        </span>
       </span>
     </div>
     <div class="pub-feed-card-body">
@@ -2580,6 +2606,14 @@
                   {/if}
                   <div class="library-card-footer">
                     <span>{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
+                    {#if essay.is_public && essay.author_username}
+                      <button type="button" onclick={(e) => { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
+                        {#if feedLinkCopiedId === essay.id}
+                          <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
+                        {/if}
+                        <Link class="size-4" aria-hidden="true" />
+                      </button>
+                    {/if}
                     <span class="library-card-dot" aria-hidden="true">·</span>
                     <span>{formatFeedDate(essay.updated_at)}</span>
                     {#if essay.is_public && essay.published_at}
@@ -2640,7 +2674,15 @@
         </div>
       {:else if readingEssay}
         <article class="pub-article">
-          <h1 class="pub-article-title">{readingEssay.title || 'Untitled'}</h1>
+          <div class="flex items-start justify-between gap-2">
+            <h1 class="pub-article-title flex-1 min-w-0">{readingEssay.title || 'Untitled'}</h1>
+            <button type="button" onclick={() => { void navigator.clipboard.writeText(window.location.href); linkCopied = true; clearTimeout(linkCopiedTimer); linkCopiedTimer = setTimeout(() => { linkCopied = false; }, 1500); }} class="mt-1 shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors p-1.5 relative" aria-label="Copy link">
+              {#if linkCopied}
+                <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
+              {/if}
+              <Link class="size-4" aria-hidden="true" />
+            </button>
+          </div>
           <div class="pub-article-byline">
             {#key readingEssay.author_avatar_seed + '' + readingEssay.author_avatar_url}
               <div class="pub-author-avatar">
