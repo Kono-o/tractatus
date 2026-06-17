@@ -2474,7 +2474,7 @@
             <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={80} />
           {/key}
           <span class="settings-panel-header__name">{accountDisplayName}</span>
-          <span class="text-[10px] text-zinc-500 leading-none">joined {accountMemberSince}</span>
+          <span class="text-[10px] text-zinc-500 leading-none settings-panel-joined">joined {accountMemberSince}</span>
           <span class="settings-panel-header__user-id leading-none" title={currentUser.id}>{currentUser.id}</span>
         </div>
 
@@ -2526,7 +2526,7 @@
         <div class="flex flex-col items-center gap-0.5 pb-0.5">
           <div class="boot-panel-avatar-spinner" aria-hidden="true"></div>
           <span class="settings-panel-header__name boot-panel-placeholder__ghost">account name</span>
-          <span class="text-[10px] boot-panel-placeholder__ghost leading-none">joined Jan 2026</span>
+          <span class="text-[10px] boot-panel-placeholder__ghost leading-none settings-panel-joined">joined Jan 2026</span>
           <span class="settings-panel-header__user-id boot-panel-placeholder__ghost leading-none">00000000-0000-0000-0000-000000000000</span>
         </div>
 
@@ -3090,8 +3090,8 @@
                 {:else}
                   <span class="settings-panel-header__name">{accountDisplayName}</span>
                 {/if}
-                <span class="text-[10px] text-zinc-500">joined {accountMemberSince}</span>
-                <span class="text-[10px] text-zinc-500">Session: {formatSessionExpiry(panel.expiresAt)}</span>
+                <span class="text-[10px] text-zinc-500 settings-panel-joined">joined {accountMemberSince}</span>
+                <span class="text-[10px] text-zinc-500 settings-panel-joined">Session: {formatSessionExpiry(panel.expiresAt)}</span>
                 <span class="settings-panel-header__user-id" title={currentUser.id}>{currentUser.id}</span>
               </div>
             {:else}

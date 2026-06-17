@@ -765,6 +765,7 @@ span.boot-panel-placeholder::after,
 }
 
 .settings-panel-header__name {
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1;
@@ -805,6 +806,7 @@ span.boot-panel-placeholder::after,
   border: none;
   border-bottom: 1px solid var(--border);
   background: transparent;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1;
@@ -849,7 +851,7 @@ span.boot-panel-placeholder::after,
 }
 
 .settings-panel-header__supabase-label {
-  font-family: var(--ui);
+  font-family: var(--font-mono);
   font-size: 1em;
   font-weight: 600;
   letter-spacing: 0.12em;
@@ -939,8 +941,9 @@ span.boot-panel-placeholder::after,
 .settings-panel-stats > .settings-panel-header__identity {
   width: 100%;
 }
-
-.settings-panel-account {
+.settings-panel-joined {
+  font-family: var(--ss);
+}
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -1162,6 +1165,7 @@ span.boot-panel-placeholder::after,
   border: 1px solid var(--border);
   background-color: var(--card);
   color: var(--text-muted);
+  font-family: var(--ui);
   font-size: 0.625rem;
   font-weight: 900;
   line-height: 1.35;
