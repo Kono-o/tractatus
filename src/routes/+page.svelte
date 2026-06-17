@@ -85,7 +85,6 @@
     EyeClosed,
     Upload,
     Newspaper,
-    BookOpen,
     BookMarked,
     Library as LibraryIcon,
   } from '@lucide/svelte';
@@ -107,6 +106,10 @@
     viewMode = 'feed';
     closeArticle();
     if (isWriting) void exitWriting();
+    searchQuery = '';
+    diarySearchQuery = '';
+    librarySearchQuery = '';
+    searchResults = [];
   }
 
   function selectMyLibraryTab() {
@@ -117,18 +120,18 @@
     viewMode = 'library';
     closeArticle();
     if (isWriting) void exitWriting();
-  }
-
-  function selectBooksTab() {
-    closeArticle();
-    if (isWriting) void exitWriting();
-    viewMode = 'books';
+    searchQuery = '';
+    diarySearchQuery = '';
+    searchResults = [];
   }
 
   function selectDiaryTab() {
     closeArticle();
     if (isWriting) void exitWriting();
     viewMode = 'diary';
+    searchQuery = '';
+    librarySearchQuery = '';
+    searchResults = [];
   }
 
   let readingEssay = $state<Essay | null>(null);
@@ -389,7 +392,7 @@
   let isPublished = $derived(!!(currentEssay?.is_public || (currentEssayId && editorSlug && essays.some(e => e.id === currentEssayId && e.is_public))));
 
   // View modes for main menu
-  let viewMode = $state<'feed' | 'books' | 'diary' | 'library'>('feed');
+  let viewMode = $state<'feed' | 'diary' | 'library'>('feed');
   let publicFeed = $state<Essay[]>([]);
   let publicFeedLoading = $state(false);
   let publicFeedLoadedOnce = $state(false);
@@ -464,7 +467,6 @@
   }
 
   let diarySearchQuery = $state('');
-  let diarySearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   function onSearchInput(value: string) {
     searchQuery = value;
@@ -474,13 +476,12 @@
       return;
     }
     if (viewMode === 'diary') {
-      if (diarySearchDebounceTimer) clearTimeout(diarySearchDebounceTimer);
-      diarySearchDebounceTimer = setTimeout(() => {
-        diarySearchQuery = value;
-      }, 350);
+      diarySearchQuery = value;
       return;
     }
-    if (value.trim()) viewMode = 'feed';
+    if (viewMode === 'feed') {
+      if (value.trim()) viewMode = 'feed';
+    }
     if (feedSearchDebounceTimer) clearTimeout(feedSearchDebounceTimer);
     if (!value.trim()) {
       searchResults = [];
@@ -502,10 +503,14 @@
         librarySearchQuery = '';
         searchQuery = '';
       }
+      if (viewMode === 'diary') {
+        diarySearchQuery = '';
+      }
       return;
     }
     searchQuery = '';
     librarySearchQuery = '';
+    diarySearchQuery = '';
     searchResults = [];
     searchLoading = false;
     if (feedSearchDebounceTimer) {
@@ -2185,6 +2190,10 @@
   // Keep writings count fresh in chip (already reactive via writingCount)
 </script>
 
+<svelte:head>
+  <link rel="preconnect" href="https://covers.openlibrary.org" />
+</svelte:head>
+
 {#snippet panelHeaderRow()}
   <div class="settings-panel-header__brand-row">
     <button
@@ -2249,8 +2258,8 @@
             type="search"
             class="pub-header-search-input"
             placeholder={viewMode === 'library' ? 'Filter essays…' : viewMode === 'diary' ? 'Search books…' : 'Search essays'}
-            value={searchQuery}
-            oninput={(e) => onSearchInput(e.currentTarget.value)}
+            bind:value={searchQuery}
+            oninput={() => onSearchInput(searchQuery)}
             onkeydown={onSearchKeydown}
             aria-label={viewMode === 'library' ? 'Filter your essays' : viewMode === 'diary' ? 'Search books' : 'Search all public essays'}
             tabindex={searchExpanded ? 0 : -1}
@@ -2620,15 +2629,6 @@
         <button
           type="button"
           class="pub-view-tab"
-          class:pub-view-tab--active={viewMode === 'books'}
-          onclick={selectBooksTab}
-        >
-          <BookOpen class="pub-view-tab-icon size-3.5" aria-hidden="true" />
-          Books
-        </button>
-        <button
-          type="button"
-          class="pub-view-tab"
           class:pub-view-tab--active={viewMode === 'diary'}
           onclick={selectDiaryTab}
         >
@@ -2648,17 +2648,10 @@
     </nav>
     {/if}
 
-  {#if viewMode === 'books'}
-    <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
-      <div class="pub-empty">
-        <div class="pub-empty-title">Books</div>
-        <div class="pub-empty-hint">Coming soon.</div>
-      </div>
-    </div>
-  {:else if viewMode === 'diary'}
+  {#if viewMode === 'diary'}
     <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
       {#if currentUser}
-        <DiaryPanel searchQuery={diarySearchQuery} />
+        <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} />
       {:else}
         <div class="pub-empty">
           <div class="pub-empty-title">Diary</div>

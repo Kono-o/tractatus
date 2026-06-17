@@ -1,7 +1,4 @@
-<script lang="ts">
-  import { db, type ReadingLog } from '$lib/db';
-  import { Star, X, Check, BookMarked, Trash2 } from '@lucide/svelte';
-
+<script context="module" lang="ts">
   interface BookResult {
     id: string;
     title: string;
@@ -10,11 +7,43 @@
     year: number | null;
   }
 
-  let { searchQuery = '' }: { searchQuery?: string } = $props();
+  const searchCache = new Map<string, BookResult[]>();
+</script>
+
+<script lang="ts">
+  import { db, type ReadingLog } from '$lib/db';
+  import { X, Star, Check, BookMarked, Trash2 } from '@lucide/svelte';
+
+  let { searchQuery = '', onselect, searchExpanded = false }: { searchQuery?: string; onselect?: () => void; searchExpanded?: boolean } = $props();
 
   let searchResults = $state<BookResult[]>([]);
   let searchLoading = $state(false);
   let searchError = $state<string | null>(null);
+  let selectedIndex = $state(-1);
+  let searchSource = $state<'client-cache' | 'server-cache' | 'openlibrary' | null>(null);
+  let searchPhase = $state<'idle' | 'debouncing' | 'contacting' | 'done' | 'error'>('idle');
+  let fetchDuration = $state(0);
+  let searchGen = 0;
+  let currentAbort: AbortController | null = null;
+  let fetchStartTime = 0;
+  let elapsed = $state(0);
+
+  let searchStatus = $derived.by(() => {
+    if (searchPhase === 'contacting') return `OpenLibrary · ${elapsed.toFixed(1)}s`;
+    if (searchPhase === 'error') return 'OpenLibrary · Failed!';
+    if (searchPhase === 'done') {
+      if (searchResults.length === 0) return `OpenLibrary · ${fetchDuration.toFixed(1)}s · 0 Results`;
+      return `OpenLibrary · ${fetchDuration.toFixed(1)}s · ${searchResults.length} Results`;
+    }
+    return 'OpenLibrary · Online';
+  });
+
+  // Elapsed timer while fetching
+  $effect(() => {
+    if (searchPhase !== 'contacting') return;
+    const t = setInterval(() => { elapsed = (performance.now() - fetchStartTime) / 1000; }, 50);
+    return () => clearInterval(t);
+  });
 
   let logs = $state<ReadingLog[]>([]);
   let logsLoading = $state(true);
@@ -46,39 +75,145 @@
     void loadLogs();
   });
 
+  function escHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function highlightMatch(text: string, query: string): string {
+    const q = query.trim();
+    if (!q) return escHtml(text);
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return escHtml(text).replace(new RegExp(`(${escaped})`, 'gi'), '<mark>$1</mark>');
+  }
+
+  function escapeSolr(s: string): string {
+    return s.replace(/[+\-&|!(){}[\]^"~*?:\\\/]/g, '\\$&');
+  }
+
+  function buildFuzzyQuery(q: string): string {
+    const words = q.trim().split(/\s+/).filter(Boolean);
+    return words.map((w) => {
+      const escaped = escapeSolr(w);
+      const term = w.length < 3 ? escaped : `${escaped}~`;
+      return `(title:${term} OR author_name:${term})`;
+    }).join(' AND ');
+  }
+
   async function doSearch(term: string) {
-    if (term.length < 2) {
-      searchResults = [];
-      searchLoading = false;
-      return;
-    }
-    searchLoading = true;
+    if (term.length < 2) return false;
+
+    currentAbort?.abort();
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 20000);
+    currentAbort = ctrl;
+    const gen = searchGen;
     searchError = null;
+    searchLoading = true;
+    elapsed = 0;
+    fetchStartTime = performance.now();
+    searchPhase = 'contacting';
     try {
-      const res = await fetch(`/api/books/search?q=${encodeURIComponent(term)}`);
+      const solrQ = buildFuzzyQuery(term);
+      const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(solrQ)}&limit=16&fields=key,title,author_name,cover_i,first_publish_year`;
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timeout);
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: 'Search failed' }));
-        throw new Error(err.message || 'Search failed');
+        throw new Error(`OpenLibrary returned ${res.status}`);
       }
       const data = await res.json();
-      searchResults = data.results ?? [];
+      const docs: any[] = data.docs ?? [];
+      const results: BookResult[] = docs.map((doc: any) => ({
+        id: doc.key ?? '',
+        title: doc.title ?? 'Untitled',
+        author: doc.author_name?.[0] ?? null,
+        coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg` : null,
+        year: doc.first_publish_year ?? null,
+      }));
+      searchCache.set(term.toLowerCase().trim(), results);
+      searchResults = results;
+      selectedIndex = -1;
+      fetchDuration = (performance.now() - fetchStartTime) / 1000;
+      searchPhase = 'done';
     } catch (e: any) {
+      clearTimeout(timeout);
+      if (e.name === 'AbortError') return false;
       searchError = e.message;
       searchResults = [];
+      selectedIndex = -1;
+      searchPhase = 'error';
     } finally {
+      if (searchGen === gen) searchLoading = false;
+    }
+    return false;
+  }
+
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  $effect(() => {
+    const q = searchQuery.trim();
+    searchGen++;
+    searchError = null;
+    if (q.length < 2) {
+      searchResults = [];
       searchLoading = false;
+      selectedIndex = -1;
+      searchSource = null;
+      fetchDuration = 0;
+      searchPhase = 'idle';
+      return;
+    }
+
+    // Synchronous cache check — no loading flash, results appear same frame
+    const cacheKey = q.toLowerCase().trim();
+    const cached = searchCache.get(cacheKey);
+    if (cached) {
+      searchResults = cached;
+      searchLoading = false;
+      searchSource = 'client-cache';
+      fetchDuration = 0;
+      searchPhase = 'done';
+      return;
+    }
+
+    searchResults = [];
+    searchPhase = 'debouncing';
+    searchLoading = true;
+    searchSource = null;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => void doSearch(q), 30);
+
+    return () => {
+      if (searchDebounce) clearTimeout(searchDebounce);
+      currentAbort?.abort();
+    };
+  });
+
+  function onDocKeydown(e: KeyboardEvent) {
+    if (selectedBook) return;
+    if (searchQuery.trim().length < 2) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (searchResults.length === 0) return;
+      selectedIndex = Math.min(selectedIndex + 1, searchResults.length - 1);
+      document.querySelector(`[data-search-index="${selectedIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (searchResults.length === 0) return;
+      if (selectedIndex <= 0) { selectedIndex = -1; return; }
+      selectedIndex = Math.max(selectedIndex - 1, 0);
+      document.querySelector(`[data-search-index="${selectedIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      if (selectedIndex >= 0 && selectedIndex < searchResults.length) {
+        e.preventDefault();
+        selectBook(searchResults[selectedIndex]);
+      }
     }
   }
 
   $effect(() => {
-    const q = searchQuery;
-    searchError = null;
-    if (!q.trim() || q.trim().length < 2) {
-      searchResults = [];
-      searchLoading = false;
-      return;
-    }
-    void doSearch(q.trim());
+    if (typeof document === 'undefined') return;
+    document.addEventListener('keydown', onDocKeydown);
+    return () => document.removeEventListener('keydown', onDocKeydown);
   });
 
   function selectBook(book: BookResult) {
@@ -89,6 +224,11 @@
     liked = null;
     readDate = new Date().toISOString().split('T')[0];
     saveError = null;
+    searchResults = [];
+    searchLoading = false;
+    searchError = null;
+    selectedIndex = -1;
+    onselect?.();
   }
 
   function editLog(log: ReadingLog) {
@@ -199,7 +339,7 @@
 
       <div class="diary-entry-book">
         {#if selectedBook.coverUrl}
-          <img src={selectedBook.coverUrl} alt={selectedBook.title} class="diary-entry-cover" />
+          <img src={selectedBook.coverUrl} alt="" class="diary-entry-cover" loading="lazy" onerror={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
         {:else}
           <div class="diary-entry-cover diary-entry-cover--empty">
             <BookMarked class="size-8" aria-hidden="true" />
@@ -273,6 +413,7 @@
           type="date"
           class="diary-entry-date"
           bind:value={readDate}
+          max={new Date().toISOString().split('T')[0]}
         />
       </div>
 
@@ -290,92 +431,55 @@
       </button>
     </div>
   {:else}
-    {#if searchError}
-      <div class="diary-search-error">{searchError}</div>
-    {/if}
+    <div class="search-results-box" class:search-results-box--open={searchExpanded}>
+      <div class="diary-status" class:diary-status--error={searchPhase === 'error'}><span class="diary-status-dot" class:diary-status-dot--error={searchPhase === 'error'} />{searchStatus}</div>
 
-    {#if searchLoading}
-      <div class="diary-loading">Searching…</div>
-    {:else if searchResults.length > 0}
-      <div class="diary-results">
-        {#each searchResults as book}
-          <button type="button" class="diary-result" onclick={() => selectBook(book)}>
-            {#if book.coverUrl}
-              <img src={book.coverUrl} alt={book.title} class="diary-result-cover" loading="lazy" />
-            {:else}
-              <div class="diary-result-cover diary-result-cover--empty">
-                <BookMarked class="size-5" aria-hidden="true" />
-              </div>
-            {/if}
-            <div class="diary-result-info">
-              <div class="diary-result-title">{book.title}</div>
-              {#if book.author}
-                <div class="diary-result-author">{book.author}{#if book.year} · {book.year}{/if}</div>
-              {/if}
-            </div>
-          </button>
-        {/each}
-      </div>
-    {:else if searchQuery.length >= 2 && !searchLoading}
-      <div class="diary-empty">No books found.</div>
-    {/if}
-
-    <div class="diary-section">
-      <h3 class="diary-section-title">Reading Log</h3>
-      {#if logsLoading}
-        <div class="diary-loading">Loading…</div>
-      {:else if logs.length === 0}
-        <div class="diary-empty">No entries yet. Search and log a book above.</div>
-      {:else}
-        <div class="diary-log-list">
-          {#each logs as log}
-            <div class="diary-log-entry">
-              {#if log.cover_url}
-                <img src={log.cover_url} alt={log.title} class="diary-log-cover" />
-              {:else}
-                <div class="diary-log-cover diary-log-cover--empty">
-                  <BookMarked class="size-4" aria-hidden="true" />
+      {#if searchQuery.trim().length >= 2}
+        {#if searchLoading}
+          <div class="diary-results diary-results--loading">
+            {#each [1, 2, 3, 4, 5] as _}
+              <div class="diary-skeleton">
+                <div class="diary-skeleton-cover" />
+                <div class="diary-skeleton-lines">
+                  <div class="diary-skeleton-line diary-skeleton-line--title" />
+                  <div class="diary-skeleton-line diary-skeleton-line--author" />
                 </div>
-              {/if}
-              <div class="diary-log-info">
-                <button type="button" class="diary-log-title" onclick={() => editLog(log)}>
-                  {log.title}
-                </button>
-                {#if log.author}
-                  <div class="diary-log-author">{log.author}</div>
-                {/if}
-                <div class="diary-log-meta">
-                  {#if log.rating}
-                    <span class="diary-log-rating">{renderStars(log.rating)}</span>
-                  {/if}
-                  {#if log.liked === true}
-                    <span class="diary-log-liked">Liked</span>
-                  {:else if log.liked === false}
-                    <span class="diary-log-disliked">Didn't like</span>
-                  {/if}
-                  <span class="diary-log-date">{formatDate(log.read_date)}</span>
-                </div>
-                {#if log.review}
-                  <div class="diary-log-review">{log.review}</div>
-                {/if}
               </div>
+            {/each}
+          </div>
+        {:else if searchResults.length > 0}
+          <div class="diary-results" role="listbox" aria-label="Search results">
+            {#each searchResults as book, i}
               <button
                 type="button"
-                class="diary-log-delete"
-                class:diary-log-delete--confirm={deleteConfirmId === log.id}
-                onclick={() => handleDelete(log.id)}
-                onblur={() => { if (deleteConfirmId === log.id) deleteConfirmId = null; }}
-                aria-label={deleteConfirmId === log.id ? 'Confirm delete' : 'Delete entry'}
+                role="option"
+                aria-selected={selectedIndex === i}
+                class="diary-result"
+                class:diary-result--selected={selectedIndex === i}
+                data-search-index={i}
+                onclick={() => selectBook(book)}
+                onmouseenter={() => { selectedIndex = i; }}
               >
-                {#if deleteConfirmId === log.id}
-                  Sure?
+                {#if book.coverUrl}
+                  <div class="diary-result-cover-wrap">
+                    <div class="diary-result-cover--skeleton" />
+                    <img src={book.coverUrl} alt="" class="diary-result-cover" loading="lazy" onload={(e) => { const el = e.target as HTMLElement; el.style.opacity = '1'; (el.previousElementSibling as HTMLElement).style.display = 'none'; }} onerror={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+                  </div>
                 {:else}
-                  <Trash2 class="size-3" aria-hidden="true" />
+                  <div class="diary-result-cover diary-result-cover--empty">
+                    <BookMarked class="size-5" aria-hidden="true" />
+                  </div>
                 {/if}
+                <div class="diary-result-info">
+                  <div class="diary-result-title">{@html highlightMatch(book.title, searchQuery)}</div>
+                  {#if book.author}
+                    <div class="diary-result-author">{@html highlightMatch(book.author, searchQuery)}{#if book.year} · {book.year}{/if}</div>
+                  {/if}
+                </div>
               </button>
-            </div>
-          {/each}
-        </div>
+            {/each}
+          </div>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -386,7 +490,6 @@
     padding: 0.75rem 1rem;
   }
 
-  .diary-search-error,
   .diary-entry-error {
     color: #ef4444;
     font-size: 11px;
@@ -405,30 +508,166 @@
     padding: 1rem 0;
   }
 
+  .diary-empty-query {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .search-results-box {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    transition: max-height 0.25s ease-out, opacity 0.2s ease-out, margin 0.25s ease-out;
+    margin: 0;
+  }
+  .search-results-box--open {
+    max-height: 500px;
+    opacity: 1;
+    margin: 4px 0;
+  }
+
+  .diary-status {
+    font-size: 10px;
+    color: var(--hint);
+    padding: 0.1rem 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.2rem;
+    display: flex;
+    align-items: center;
+  }
+  .diary-status--error {
+    color: #ef4444;
+  }
+  .diary-status-dot {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #22c55e;
+    margin-right: 0.3rem;
+    box-shadow: 0 0 4px #22c55e;
+  }
+  .diary-status-dot--error {
+    background: #ef4444;
+    box-shadow: 0 0 4px #ef4444;
+  }
+
+  /* ── Skeleton ── */
+  @keyframes shimmer {
+    0% { background-position: -200px 0; }
+    100% { background-position: calc(200px + 100%) 0; }
+  }
+
+  .diary-results--loading {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .diary-skeleton {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px;
+  }
+  .diary-skeleton-cover {
+    width: 36px;
+    height: 54px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%);
+    background-size: 200px 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  .diary-skeleton-lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .diary-skeleton-line {
+    height: 10px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%);
+    background-size: 200px 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+  .diary-skeleton-line--title {
+    width: 35%;
+  }
+  .diary-skeleton-line--author {
+    width: 25%;
+  }
+
+  /* ── Results ── */
+  @keyframes diary-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
   .diary-results {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    margin-bottom: 1rem;
-    max-height: 280px;
+    gap: 2px;
+    max-height: 340px;
     overflow-y: auto;
+    overflow-x: hidden;
+    scroll-behavior: smooth;
+    animation: diary-fade-in 0.2s ease-out;
+  }
+  .diary-results:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+  .diary-results {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .diary-results::-webkit-scrollbar {
+    width: 5px;
+  }
+  .diary-results::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .diary-results::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+  .diary-results::-webkit-scrollbar-thumb:hover {
+    background: var(--hint);
   }
 
   .diary-result {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 6px;
+    padding: 6px 8px;
     border-radius: 8px;
     background: transparent;
     border: none;
     cursor: pointer;
     text-align: left;
     width: 100%;
-    transition: background 0.15s;
+    transition: background 0.1s;
   }
   .diary-result:hover {
-    background: var(--surface);
+    background: var(--surf);
+  }
+  .diary-result:active {
+    background: var(--border);
+  }
+
+  .diary-result mark {
+    background: var(--mark-bg, #b4c6d8);
+    color: var(--text);
+    padding: 0 0.1em;
+    border-radius: 2px;
+    font-weight: 600;
   }
 
   .diary-result-cover {
@@ -437,13 +676,37 @@
     object-fit: cover;
     border-radius: 4px;
     flex-shrink: 0;
-    background: var(--surface);
   }
   .diary-result-cover--empty {
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--hint);
+    background: var(--surf);
+  }
+  .diary-result-cover-wrap {
+    position: relative;
+    flex-shrink: 0;
+    width: 36px;
+    height: 54px;
+  }
+  .diary-result-cover-wrap .diary-result-cover {
+    position: absolute;
+    top: 0;
+    left: 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .diary-result-cover--skeleton {
+    width: 36px;
+    height: 54px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%);
+    background-size: 200px 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+  .diary-result-cover--hidden {
+    display: none;
   }
 
   .diary-result-info {
@@ -506,7 +769,7 @@
     object-fit: cover;
     border-radius: 4px;
     flex-shrink: 0;
-    background: var(--surface);
+    background: var(--surf);
   }
   .diary-entry-cover--empty {
     display: flex;
@@ -667,7 +930,7 @@
     object-fit: cover;
     border-radius: 4px;
     flex-shrink: 0;
-    background: var(--surface);
+    background: var(--surf);
   }
   .diary-log-cover--empty {
     display: flex;
@@ -745,12 +1008,21 @@
     flex-shrink: 0;
     font-size: 11px;
     border-radius: 4px;
+    min-width: 44px;
+    text-align: center;
+    transition: background 0.12s, color 0.12s;
   }
-  .diary-log-delete:hover {
-    background: var(--surface);
+  .diary-log-delete:hover,
+  .diary-log-delete:focus-visible {
+    background: var(--surf);
+    outline: none;
   }
   .diary-log-delete--confirm {
     color: #ef4444;
     background: rgba(239, 68, 68, 0.1);
   }
+  .diary-log-delete--confirm:hover {
+    background: rgba(239, 68, 68, 0.2);
+  }
 </style>
+
