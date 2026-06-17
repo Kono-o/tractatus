@@ -85,6 +85,7 @@
     EyeClosed,
     Upload,
     Newspaper,
+    BookOpen,
     BookMarked,
     Library as LibraryIcon,
   } from '@lucide/svelte';
@@ -2632,8 +2633,8 @@
           class:pub-view-tab--active={viewMode === 'diary'}
           onclick={selectDiaryTab}
         >
-          <BookMarked class="pub-view-tab-icon size-3.5" aria-hidden="true" />
-          Diary
+          <BookOpen class="pub-view-tab-icon size-3.5" aria-hidden="true" />
+          Books
         </button>
         <button
           type="button"
@@ -2654,7 +2655,7 @@
         <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} />
       {:else}
         <div class="pub-empty">
-          <div class="pub-empty-title">Diary</div>
+          <div class="pub-empty-title">Books</div>
           <div class="pub-empty-hint">Sign in to log your reading.</div>
         </div>
       {/if}

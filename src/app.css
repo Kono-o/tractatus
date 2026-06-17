@@ -3022,6 +3022,8 @@ span.boot-panel-placeholder::after,
   outline: none;
   appearance: none;
   -webkit-appearance: none;
+  &::-webkit-search-cancel-button { display: none; }
+  &::-ms-clear { display: none; }
   padding: 0 0.5rem;
   box-sizing: border-box;
 }

@@ -52,6 +52,10 @@
 
   let selectedBook = $state<BookResult | null>(null);
   let editingLog = $state<ReadingLog | null>(null);
+  let showLogForm = $state(false);
+
+  let bookDetails = $state<any>(null);
+  let bookDetailsLoading = $state(false);
 
   let reviewText = $state('');
   let rating = $state<number>(0);
@@ -222,21 +226,36 @@
 
   function selectBook(book: BookResult) {
     selectedBook = book;
-    editingLog = null;
-    reviewText = '';
-    rating = 0;
-    liked = null;
-    readDate = new Date().toISOString().split('T')[0];
-    saveError = null;
+    showLogForm = false;
+    bookDetails = null;
     searchResults = [];
     searchLoading = false;
     searchError = null;
     selectedIndex = -1;
     onselect?.();
+    fetchBookDetails(book.id);
+  }
+
+  async function fetchBookDetails(workId: string) {
+    bookDetailsLoading = true;
+    bookDetails = null;
+    try {
+      const olid = workId.replace('/works/', '');
+      const res = await fetch(`https://openlibrary.org/works/${olid}.json`);
+      if (!res.ok) throw new Error('Failed to fetch book details');
+      const data = await res.json();
+      bookDetails = data;
+    } catch {
+      bookDetails = null;
+    } finally {
+      bookDetailsLoading = false;
+    }
   }
 
   function editLog(log: ReadingLog) {
     editingLog = log;
+    showLogForm = true;
+    bookDetails = null;
     selectedBook = {
       id: log.book_id,
       title: log.title,
@@ -253,9 +272,21 @@
     saveError = null;
   }
 
+  function startLogging() {
+    editingLog = null;
+    reviewText = '';
+    rating = 0;
+    liked = null;
+    readDate = new Date().toISOString().split('T')[0];
+    saveError = null;
+    showLogForm = true;
+  }
+
   function clearSelection() {
     selectedBook = null;
     editingLog = null;
+    showLogForm = false;
+    bookDetails = null;
     reviewText = '';
     rating = 0;
     liked = null;
@@ -333,109 +364,200 @@
 
 <div class="diary-panel">
   {#if selectedBook}
-    <div class="diary-entry-form">
-      <div class="diary-entry-form-header">
-        <button type="button" class="diary-back-btn" onclick={clearSelection}>
-          ← Back
-        </button>
-        <h3 class="diary-entry-form-title">
-          {editingLog ? 'Edit Log' : 'New Entry'}
-        </h3>
-      </div>
-
-      <div class="diary-entry-book">
-        {#if selectedBook.coverUrl}
-          <img src={selectedBook.coverUrl} alt="" class="diary-entry-cover" loading="lazy" onerror={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
-        {:else}
-          <div class="diary-entry-cover diary-entry-cover--empty">
-            <BookMarked class="size-8" aria-hidden="true" />
-          </div>
-        {/if}
-        <div class="diary-entry-book-info">
-          <div class="diary-entry-book-title">{selectedBook.title}</div>
-          {#if selectedBook.author}
-            <div class="diary-entry-book-author">{selectedBook.author}</div>
-          {/if}
+    {#if showLogForm}
+      <div class="diary-entry-form">
+        <div class="diary-entry-form-header">
+          <button type="button" class="diary-back-btn" onclick={clearSelection}>
+            ← Back
+          </button>
+          <h3 class="diary-entry-form-title">
+            {editingLog ? 'Edit Log' : 'New Entry'}
+          </h3>
         </div>
-      </div>
 
-      <div class="diary-entry-field">
-        <label class="diary-entry-label">Rating</label>
-        <div class="diary-stars">
-          {#each [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5] as val}
+        <div class="diary-entry-book">
+          {#if selectedBook.coverUrl}
+            <img src={selectedBook.coverUrl} alt="" class="diary-entry-cover" loading="lazy" onerror={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+          {:else}
+            <div class="diary-entry-cover diary-entry-cover--empty">
+              <BookMarked class="size-8" aria-hidden="true" />
+            </div>
+          {/if}
+          <div class="diary-entry-book-info">
+            <div class="diary-entry-book-title">{selectedBook.title}</div>
+            {#if selectedBook.author}
+              <div class="diary-entry-book-author">{selectedBook.author}</div>
+            {/if}
+          </div>
+        </div>
+
+        <div class="diary-entry-field">
+          <label class="diary-entry-label">Rating</label>
+          <div class="diary-stars">
+            {#each [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5] as val}
+              <button
+                type="button"
+                class="diary-star-btn"
+                class:diary-star-btn--active={val <= rating}
+                class:diary-star-btn--half={val === rating && val % 1 !== 0}
+                onclick={() => setRating(val)}
+                aria-label="{val} stars"
+              >
+                <Star class="size-5" aria-hidden="true" />
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="diary-entry-field">
+          <label class="diary-entry-label">Liked it?</label>
+          <div class="diary-liked-row">
             <button
               type="button"
-              class="diary-star-btn"
-              class:diary-star-btn--active={val <= rating}
-              class:diary-star-btn--half={val === rating && val % 1 !== 0}
-              onclick={() => setRating(val)}
-              aria-label="{val} stars"
+              class="diary-liked-btn"
+              class:diary-liked-btn--yes={liked === true}
+              class:diary-liked-btn--null={liked === null}
+              onclick={cycleLiked}
             >
-              <Star class="size-5" aria-hidden="true" />
+              {#if liked === true}
+                <Check class="size-4" aria-hidden="true" />
+                Liked
+              {:else if liked === false}
+                <X class="size-4" aria-hidden="true" />
+                Didn't like
+              {:else}
+                Skip
+              {/if}
             </button>
-          {/each}
+          </div>
         </div>
-      </div>
 
-      <div class="diary-entry-field">
-        <label class="diary-entry-label">Liked it?</label>
-        <div class="diary-liked-row">
-          <button
-            type="button"
-            class="diary-liked-btn"
-            class:diary-liked-btn--yes={liked === true}
-            class:diary-liked-btn--null={liked === null}
-            onclick={cycleLiked}
-          >
-            {#if liked === true}
-              <Check class="size-4" aria-hidden="true" />
-              Liked
-            {:else if liked === false}
-              <X class="size-4" aria-hidden="true" />
-              Didn't like
-            {:else}
-              Skip
-            {/if}
+        <div class="diary-entry-field">
+          <label class="diary-entry-label" for="diary-review">Review</label>
+          <textarea
+            id="diary-review"
+            class="diary-entry-textarea"
+            bind:value={reviewText}
+            placeholder="What did you think? (optional)"
+            maxlength={5000}
+            rows={4}
+          ></textarea>
+        </div>
+
+        <div class="diary-entry-field">
+          <label class="diary-entry-label" for="diary-date">Date read</label>
+          <input
+            id="diary-date"
+            type="date"
+            class="diary-entry-date"
+            bind:value={readDate}
+            max={new Date().toISOString().split('T')[0]}
+          />
+        </div>
+
+        {#if saveError}
+          <div class="diary-entry-error">{saveError}</div>
+        {/if}
+
+        <button
+          type="button"
+          class="diary-save-btn"
+          disabled={saving}
+          onclick={saveLog}
+        >
+          {saving ? 'Saving…' : editingLog ? 'Update Entry' : 'Log Entry'}
+        </button>
+      </div>
+    {:else}
+      <div class="diary-info-panel">
+        <div class="diary-info-header">
+          <button type="button" class="diary-back-btn" onclick={clearSelection}>
+            ← Back
           </button>
+          <h3 class="diary-info-title">Book Details</h3>
         </div>
+
+        {#if bookDetailsLoading}
+          <div class="diary-info-loading">Loading details…</div>
+        {:else if bookDetails}
+          <div class="diary-info-top">
+            {#if selectedBook.coverUrl}
+              <img src={selectedBook.coverUrl} alt="" class="diary-info-cover" />
+            {:else}
+              <div class="diary-info-cover diary-info-cover--empty">
+                <BookMarked class="size-10" aria-hidden="true" />
+              </div>
+            {/if}
+            <div class="diary-info-top-text">
+              <div class="diary-info-title-text">{selectedBook.title}</div>
+              {#if selectedBook.author}
+                <div class="diary-info-author">{selectedBook.author}</div>
+              {/if}
+              <div class="diary-info-meta-line">
+                {#if selectedBook.year}<span>{selectedBook.year}</span>{/if}
+                {#if selectedBook.year && selectedBook.publisher}<span class="diary-info-dot" />{/if}
+                {#if selectedBook.publisher}<span>{selectedBook.publisher}</span>{/if}
+                {#if (selectedBook.year || selectedBook.publisher) && selectedBook.editions}<span class="diary-info-dot" />{/if}
+                {#if selectedBook.editions}<span>{selectedBook.editions} editions</span>{/if}
+              </div>
+            </div>
+          </div>
+
+          <div class="diary-info-section">
+            <div class="diary-info-section-title">Description</div>
+            <div class="diary-info-description">
+              {#if typeof bookDetails.description === 'string'}
+                {bookDetails.description}
+              {:else if bookDetails.description?.value}
+                {bookDetails.description.value}
+              {:else}
+                <span class="diary-info-missing">No description available.</span>
+              {/if}
+            </div>
+          </div>
+
+          <div class="diary-info-details-grid">
+            {#if bookDetails.subjects?.length}
+              <div class="diary-info-section">
+                <div class="diary-info-section-title">Subjects</div>
+                <div class="diary-info-tags">
+                  {#each bookDetails.subjects.slice(0, 8) as subj}
+                    <span class="diary-info-tag">{subj}</span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if bookDetails.subject_people?.length}
+              <div class="diary-info-section">
+                <div class="diary-info-section-title">People</div>
+                <div class="diary-info-tags">
+                  {#each bookDetails.subject_people.slice(0, 6) as person}
+                    <span class="diary-info-tag">{person}</span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if bookDetails.subject_places?.length}
+              <div class="diary-info-section">
+                <div class="diary-info-section-title">Places</div>
+                <div class="diary-info-tags">
+                  {#each bookDetails.subject_places.slice(0, 4) as place}
+                    <span class="diary-info-tag">{place}</span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </div>
+
+          <button type="button" class="diary-log-btn" onclick={startLogging}>
+            <BookMarked class="size-4" aria-hidden="true" />
+            Log Reading
+          </button>
+        {:else}
+          <div class="diary-info-loading">Could not load book details.</div>
+        {/if}
       </div>
-
-      <div class="diary-entry-field">
-        <label class="diary-entry-label" for="diary-review">Review</label>
-        <textarea
-          id="diary-review"
-          class="diary-entry-textarea"
-          bind:value={reviewText}
-          placeholder="What did you think? (optional)"
-          maxlength={5000}
-          rows={4}
-        ></textarea>
-      </div>
-
-      <div class="diary-entry-field">
-        <label class="diary-entry-label" for="diary-date">Date read</label>
-        <input
-          id="diary-date"
-          type="date"
-          class="diary-entry-date"
-          bind:value={readDate}
-          max={new Date().toISOString().split('T')[0]}
-        />
-      </div>
-
-      {#if saveError}
-        <div class="diary-entry-error">{saveError}</div>
-      {/if}
-
-      <button
-        type="button"
-        class="diary-save-btn"
-        disabled={saving}
-        onclick={saveLog}
-      >
-        {saving ? 'Saving…' : editingLog ? 'Update Entry' : 'Log Entry'}
-      </button>
-    </div>
+    {/if}
   {:else}
     <div class="search-results-box" class:search-results-box--open={searchExpanded}>
       <div class="diary-status" class:diary-status--error={searchPhase === 'error'}><span class="diary-status-dot" class:diary-status-dot--error={searchPhase === 'error'} />{searchStatus}</div>
@@ -479,11 +601,11 @@
                 <div class="diary-result-info">
                   <div class="diary-result-title">{@html highlightMatch(book.title, searchQuery)}</div>
                   {#if book.author}
-                    <div class="diary-result-author">{@html highlightMatch(book.author, searchQuery)}{#if book.year} · {book.year}{/if}</div>
+                    <div class="diary-result-author">{#if book.year}{book.year}<span class="diary-result-dot" />{/if}{@html highlightMatch(book.author, searchQuery)}</div>
                   {/if}
                   <div class="diary-result-meta">
-                    {#if book.editions}{book.editions} ed.{/if}
-                    {#if book.publisher}{#if book.editions} · {/if}{book.publisher}{/if}
+                    {#if book.publisher}{book.publisher}{/if}
+                    {#if book.editions}{#if book.publisher}<span class="diary-result-dot" />{/if}{book.editions} ed.{/if}
                   </div>
                 </div>
               </button>
@@ -731,19 +853,28 @@
     text-overflow: ellipsis;
   }
   .diary-result-author {
-    font-size: 11px;
-    color: var(--hint);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .diary-result-meta {
     font-size: 10px;
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     margin-top: 1px;
+  }
+  .diary-result-dot {
+    display: inline-block;
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    background: currentColor;
+    margin: 0 0.35em;
+    vertical-align: middle;
+  }
+  .diary-result-meta {
+    font-size: 11px;
+    color: var(--hint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Entry Form */
@@ -773,6 +904,142 @@
     font-weight: 600;
     color: var(--ink);
     margin: 0;
+  }
+
+  /* Book Info Panel */
+  .diary-info-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .diary-info-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .diary-info-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0;
+  }
+  .diary-info-loading {
+    font-size: 12px;
+    color: var(--hint);
+    padding: 2rem 0;
+    text-align: center;
+  }
+  .diary-info-top {
+    display: flex;
+    gap: 14px;
+  }
+  .diary-info-cover {
+    width: 80px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .diary-info-cover--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--hint);
+    background: var(--surf);
+  }
+  .diary-info-top-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .diary-info-title-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.3;
+  }
+  .diary-info-author {
+    font-size: 13px;
+    color: var(--hint);
+  }
+  .diary-info-meta-line {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0;
+  }
+  .diary-info-dot {
+    display: inline-block;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    margin: 0 0.4em;
+    vertical-align: middle;
+  }
+  .diary-info-section {
+    margin-top: 0.25rem;
+  }
+  .diary-info-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.3rem;
+  }
+  .diary-info-description {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .diary-info-missing {
+    color: var(--hint);
+    font-style: italic;
+  }
+  .diary-info-details-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .diary-info-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .diary-info-tag {
+    font-size: 10px;
+    color: var(--hint);
+    background: var(--surf);
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+  }
+  .diary-log-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .diary-log-btn:hover {
+    background: var(--surf);
   }
 
   .diary-entry-book {
