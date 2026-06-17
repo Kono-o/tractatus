@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { db, type Essay, estimateReadTimeMinutes } from '$lib/db';
-  import { renderEssay } from '$lib/markdown';
-  import GeneratedAvatar from '$lib/components/GeneratedAvatar.svelte';
-  import { Eye, EyeClosed, ArrowLeft, User, Link } from '@lucide/svelte';
+  import EssayView from '$lib/components/EssayView.svelte';
+  import { ArrowLeft, Eye, EyeClosed } from '@lucide/svelte';
+  import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
 
   let username = $derived($page.params.username);
   let slug = $derived($page.params.slug);
@@ -11,18 +12,15 @@
   let essay = $state<Essay | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
+  let linkCopied = $state(false);
+  let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   let logoEyeOpen = $state(
     typeof localStorage !== 'undefined' && localStorage.getItem('logoEyeOpen') === 'true'
   );
 
-  let linkCopied = $state(false);
-  let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
-
   function goBack() {
-    if (history.length > 1) history.back();
-    else window.location.href = '/';
+    void goto('/');
   }
 
   function copyLink() {
@@ -52,20 +50,6 @@
       console.warn('[logoEye] failed to apply theme class', e);
     }
   });
-
-  $effect(() => {
-    if (typeof window === 'undefined') return;
-    window.addEventListener('popstate', goBack);
-    return () => window.removeEventListener('popstate', goBack);
-  });
-
-  function countWords(s: string): number {
-    return (s || '').trim().split(/\s+/).filter(Boolean).length;
-  }
-
-  function fmtReadTime(n: number): string {
-    return n === 1 ? '~1 min' : `~${n} mins`;
-  }
 
   async function load() {
     loading = true;
@@ -126,52 +110,18 @@
         </button>
       </div>
     </div>
-    <div class="flex flex-col flex-1 min-h-0 h-0 overflow-y-auto scrollbar-none" style="scrollbar-width: none; -ms-overflow-style: none;">
-      <div class="pub-article">
-        {#if loading}
-          <div class="pub-empty">Loading article…</div>
-        {:else if error}
-          <div class="pub-empty">
-            <div class="pub-empty-title">{error}</div>
-            <button type="button" onclick={goBack} class="pub-article-back-link">← Back to feed</button>
-          </div>
-        {:else if essay}
-          <div class="flex items-start justify-between gap-2">
-            <h1 class="pub-article-title flex-1 min-w-0">{essay.title || 'Untitled'}</h1>
-            <button type="button" onclick={copyLink} class="mt-1 shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors p-1.5 relative" aria-label="Copy link">
-              {#if linkCopied}
-                <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
-              {/if}
-              <Link class="size-4" aria-hidden="true" />
-            </button>
-          </div>
-          <div class="pub-article-byline">
-            {#key essay.author_avatar_seed + '' + essay.author_avatar_url}
-              <div class="pub-author-avatar">
-                <GeneratedAvatar
-                  userId={essay.user_id}
-                  seed={essay.author_avatar_seed}
-                  avatarUrl={essay.author_avatar_url}
-                  size={24}
-                  rounded={20}
-                />
-              </div>
-            {/key}
-            <span class="pub-author-meta">
-              {essay.author_username || 'Anonymous'} &nbsp;·&nbsp;
-              {new Date(essay.published_at || essay.updated_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} &nbsp;·&nbsp;
-              {countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}
-            </span>
-          </div>
-          <div class="pub-article-prose reader-prose markdown-content">
-            {@html renderEssay(essay.content)}
-          </div>
-        {/if}
-      </div>
+    <div class="flex flex-col flex-1 min-h-0 h-0 overflow-y-auto pub-scroll">
+
+      {#if loading}
+        <div class="pub-empty">Loading article…</div>
+      {:else if error}
+        <div class="pub-empty">
+          <div class="pub-empty-title">{error}</div>
+          <button type="button" onclick={goBack} class="pub-article-back-link">← Back to feed</button>
+        </div>
+      {:else if essay}
+        <EssayView {essay} {linkCopied} onCopyLink={copyLink} />
+      {/if}
     </div>
   </div>
 </div>
-
-<style>
-  .scrollbar-none::-webkit-scrollbar { display: none; }
-</style>

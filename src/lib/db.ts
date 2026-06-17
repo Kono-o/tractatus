@@ -894,6 +894,28 @@ export const db = {
 		return essay;
 	},
 
+	async getUserByUsername(username: string): Promise<{ user_id: string; username: string; avatar_seed: string | null; avatar_url: string | null; created_at: string | null } | null> {
+		const { data } = await supabase
+			.from('usernames')
+			.select('user_id, username, avatar_seed, avatar_url, created_at')
+			.eq('username', username)
+			.maybeSingle();
+		return data;
+	},
+
+	async getPublicEssaysByUser(userId: string, limit = 50): Promise<Essay[]> {
+		const { data } = await supabase
+			.from('essays')
+			.select('*')
+			.eq('user_id', userId)
+			.eq('is_public', true)
+			.order('published_at', { ascending: false })
+			.limit(limit);
+		const essays = (data || []) as Essay[];
+		await attachAuthors(essays);
+		return essays;
+	},
+
 	/** Search all public essays (includes the current user's published work). */
 	async searchPublicEssays(query: string, limit = 50): Promise<Essay[]> {
 		if (!checkClientRateLimit('search', 'global', 10, 60_000)) {

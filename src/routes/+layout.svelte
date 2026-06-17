@@ -7,8 +7,6 @@
   let { children } = $props();
 
   onMount(async () => {
-    // Dynamic import: native/Capacitor code must never run during SSR (prevents 500s on Vercel).
-    // Only the Capacitor static build (Android/PWA) or client hydration executes this.
     const { initNativeShell } = await import('$lib/native');
     void initNativeShell();
   });
@@ -20,4 +18,6 @@
   <link rel="preload" href={spaceMonoLatin} as="font" type="font/woff2" crossorigin="anonymous" />
 </svelte:head>
 
-{@render children() }
+<div data-sveltekit-preload-code="hover">
+  {@render children() }
+</div>

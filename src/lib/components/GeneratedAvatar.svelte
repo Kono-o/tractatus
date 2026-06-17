@@ -33,20 +33,20 @@
     const h = hash;
 
     const hue = h % 360;
-    const sat = 28 + (h % 13);
-    const light = 72 + (h % 11);
+    const cellSat = 22 + (h % 20);
+    const cellLight = 70 + (h % 14);
 
-    // Background: lighter version
-    const bgLight = Math.min(96, light + 20);
-    const bgSat = Math.max(10, sat - 16);
+    // Background: same hue, nearly desaturated, slightly lighter
+    const bgSat = 0 + (h % 10);
+    const bgLight = Math.min(97, cellLight + 16);
 
-    const cellColor = `oklch(${(light + 3) / 100} ${(sat + 1) / 100} ${hue})`;
+    const cellColor = `oklch(${cellLight / 100} ${cellSat / 100} ${hue})`;
     const bgColor = `oklch(${bgLight / 100} ${bgSat / 100} ${hue})`;
 
     // Build symmetric 5x5 grid
     const g: boolean[][] = [];
     for (let y = 0; y < GRID_SIZE; y++) {
-      const row: number[] = [];
+      const row: boolean[] = [];
       for (let x = 0; x < Math.ceil(GRID_SIZE / 2); x++) {
         const bitPos = (y * 5 + x * 2) % 31;
         const on = ((h >> bitPos) & 1) === 1;

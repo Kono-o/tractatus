@@ -31,6 +31,7 @@
   import { isNativeApp } from '$lib/native';
   import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
   import DiaryPanel from '$lib/components/DiaryPanel.svelte';
+  import EssayView from '$lib/components/EssayView.svelte';
   import type { User as SupabaseUser } from '@supabase/supabase-js';
   import {
     preprocessMarkdown,
@@ -150,6 +151,13 @@
     if (window.location.pathname !== '/') history.pushState(null, '', '/');
   }
 
+  function copyLink() {
+    void navigator.clipboard.writeText(window.location.href);
+    linkCopied = true;
+    clearTimeout(linkCopiedTimer);
+    linkCopiedTimer = setTimeout(() => { linkCopied = false; }, 1500);
+  }
+
   // Click handler for rendered article HTML. Delegates copy-button clicks and anchors.
   function onArticleProseClick(e: MouseEvent) {
     try {
@@ -212,6 +220,8 @@
     else if (readingEssay) closeArticle();
     else void goto('/');
   }
+
+
 
 
 
@@ -468,6 +478,16 @@
   }
 
   let diarySearchQuery = $state('');
+  let bookSelected = $state(false);
+
+  function clearBookSelection() {
+    bookSelected = false;
+  }
+
+  function viewUser(username: string, avatarUrl?: string | null, avatarSeed?: string | null) {
+    if (readingEssay) closeArticle();
+    void goto('/@' + encodeURIComponent(username));
+  }
 
   function onSearchInput(value: string) {
     searchQuery = value;
@@ -2254,17 +2274,23 @@
           aria-hidden={articleMode || undefined}
           inert={articleMode || undefined}
         >
-          <input
-            bind:this={searchInputEl}
-            type="search"
-            class="pub-header-search-input"
-            placeholder={viewMode === 'library' ? 'Filter essays…' : viewMode === 'diary' ? 'Search books…' : 'Search essays'}
-            bind:value={searchQuery}
-            oninput={() => onSearchInput(searchQuery)}
-            onkeydown={onSearchKeydown}
-            aria-label={viewMode === 'library' ? 'Filter your essays' : viewMode === 'diary' ? 'Search books' : 'Search all public essays'}
-            tabindex={searchExpanded ? 0 : -1}
-          />
+          <div class="pub-header-search-slot-inner">
+            <span class="pub-header-search-slot-icon" aria-hidden="true">
+              <span class="pub-header-search-slot-icon__item" class:pub-header-search-slot-icon__item--active={!searchQuery.trim()}><Search class="size-3.5" /></span>
+              <span class="pub-header-search-slot-icon__item" class:pub-header-search-slot-icon__item--active={searchQuery.trim().length > 0}><X class="size-3.5" /></span>
+            </span>
+            <input
+              bind:this={searchInputEl}
+              type="search"
+              class="pub-header-search-input"
+              placeholder={viewMode === 'library' ? 'Filter essays…' : viewMode === 'diary' ? 'Search books…' : 'Search feed…'}
+              bind:value={searchQuery}
+              oninput={() => onSearchInput(searchQuery)}
+              onkeydown={onSearchKeydown}
+              aria-label={viewMode === 'library' ? 'Filter your essays' : viewMode === 'diary' ? 'Search books' : 'Search feed'}
+              tabindex={searchExpanded ? 0 : -1}
+            />
+          </div>
         </div>
         <button
           type="button"
@@ -2367,31 +2393,33 @@
     <div class="pub-feed-card-meta">
       <span class="pub-feed-card-meta-left">
         {#key essay.author_avatar_seed + '' + essay.author_avatar_url}
-          <span class="pub-feed-card-avatar">
-            <GeneratedAvatar
-              userId={essay.user_id}
-              seed={essay.author_avatar_seed}
-              avatarUrl={essay.author_avatar_url}
-              size={featured ? 24 : 20}
-              rounded={20}
-            />
-          </span>
+          <button type="button" class="user-chip" onclick={(e) => { e.stopPropagation(); viewUser(essay.author_username || 'Anonymous', essay.author_avatar_url, essay.author_avatar_seed); }}>
+            <span class="pub-feed-card-avatar">
+              <GeneratedAvatar
+                userId={essay.user_id}
+                seed={essay.author_avatar_seed}
+                avatarUrl={essay.author_avatar_url}
+                size={featured ? 24 : 20}
+                rounded={20}
+              />
+            </span>
+            <span class="pub-feed-card-byline">
+              {essay.author_username || 'Anonymous'}
+            </span>
+          </button>
         {/key}
-        <span class="pub-feed-card-byline">
-          {essay.author_username || 'Anonymous'}
-        </span>
         <span class="pub-feed-card-sep" aria-hidden="true">·</span>
         <span class="pub-feed-card-date">{formatFeedDate(essay.published_at || essay.updated_at)}</span>
       </span>
       <span class="pub-feed-card-meta-right">
         <span class="pub-feed-card-readtime">{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
         <span class="relative inline-flex items-center">
-          <button type="button" onclick={(e) => { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username || '')}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
+          <span role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username || '')}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username || '')}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
             {#if feedLinkCopiedId === essay.id}
               <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
             {/if}
             <Link class="size-4" aria-hidden="true" />
-          </button>
+          </span>
         </span>
       </span>
     </div>
@@ -2616,6 +2644,14 @@
     </div>
   {:else}
     {#if !readingEssay && !readingEssayLoading}
+      {#if bookSelected}
+        <div class="pub-header-sub">
+          <button type="button" class="pub-header-back-btn" onclick={clearBookSelection}>
+            <ArrowLeft class="size-3.5" aria-hidden="true" />
+            Back
+          </button>
+        </div>
+      {:else}
     <nav class="pub-view-nav" aria-label="Feed, books, essays, and library">
       <button
         type="button"
@@ -2647,12 +2683,13 @@
         </button>
       {/if}
     </nav>
+      {/if}
     {/if}
 
   {#if viewMode === 'diary'}
     <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
       {#if currentUser}
-        <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} />
+        <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} bind:bookSelected onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} />
       {:else}
         <div class="pub-empty">
           <div class="pub-empty-title">Books</div>
@@ -2702,12 +2739,12 @@
                   <div class="library-card-footer">
                     <span>{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
                     {#if essay.is_public && essay.author_username}
-                      <button type="button" onclick={(e) => { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
+                      <span role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
                         {#if feedLinkCopiedId === essay.id}
                           <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
                         {/if}
                         <Link class="size-4" aria-hidden="true" />
-                      </button>
+                      </span>
                     {/if}
                     <span class="library-card-dot" aria-hidden="true">·</span>
                     <span>{formatFeedDate(essay.updated_at)}</span>
@@ -2768,38 +2805,7 @@
           <button type="button" class="pub-article-back-link" onclick={closeArticle}>← Back to feed</button>
         </div>
       {:else if readingEssay}
-        <article class="pub-article">
-          <div class="flex items-start justify-between gap-2">
-            <h1 class="pub-article-title flex-1 min-w-0">{readingEssay.title || 'Untitled'}</h1>
-            <button type="button" onclick={() => { void navigator.clipboard.writeText(window.location.href); linkCopied = true; clearTimeout(linkCopiedTimer); linkCopiedTimer = setTimeout(() => { linkCopied = false; }, 1500); }} class="mt-1 shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors p-1.5 relative" aria-label="Copy link">
-              {#if linkCopied}
-                <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
-              {/if}
-              <Link class="size-4" aria-hidden="true" />
-            </button>
-          </div>
-          <div class="pub-article-byline">
-            {#key readingEssay.author_avatar_seed + '' + readingEssay.author_avatar_url}
-              <div class="pub-author-avatar">
-                <GeneratedAvatar
-                  userId={readingEssay.user_id}
-                  seed={readingEssay.author_avatar_seed}
-                  avatarUrl={readingEssay.author_avatar_url}
-                  size={24}
-                  rounded={20}
-                />
-              </div>
-            {/key}
-            <span class="pub-author-meta">
-              {readingEssay.author_username || 'Anonymous'} &nbsp;·&nbsp;
-              {new Date(readingEssay.published_at || readingEssay.updated_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} &nbsp;·&nbsp;
-              {countWords(readingEssay.content)} words · {fmtReadTime(estimateReadTimeMinutes(readingEssay.content))}
-            </span>
-          </div>
-          <div class="pub-article-prose reader-prose markdown-content" onclick={onArticleProseClick}>
-            {@html renderEssay(readingEssay.content)}
-          </div>
-        </article>
+        <EssayView essay={readingEssay} {linkCopied} onCopyLink={copyLink} onProseClick={onArticleProseClick} onViewUser={(e) => { e.stopPropagation(); viewUser(readingEssay!.author_username || 'Anonymous', readingEssay!.author_avatar_url, readingEssay!.author_avatar_seed); }} />
       {:else if isFeedSearching}
         {#if searchLoading}
           <div class="pub-empty">Searching…</div>
@@ -2894,7 +2900,7 @@
         onclick={(e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); manuallyOpenUpdateMenu(); } }}
         onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (e.ctrlKey || e.metaKey) manuallyOpenUpdateMenu(); } }}
       >
-        Tractatus v{APP_VERSION}
+        TRACTATUS v{APP_VERSION}
       </span>
       <span class="app-footer__sep" aria-hidden="true">—</span>
       <span
@@ -2904,7 +2910,7 @@
         onclick={(e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.stopPropagation(); manuallyOpenPostUpdateMenu(); } }}
         onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (e.ctrlKey || e.metaKey) manuallyOpenPostUpdateMenu(); } }}
       >
-        All rights reserved by Arya.
+        made by Arya
       </span>
     </a>
   </div>
@@ -2981,7 +2987,7 @@
 
       <div class="settings-panel-body text-[10px] leading-snug">
         {#if currentUser}
-          <div class="flex flex-col items-center gap-1.5 py-1">
+          <div class="flex flex-col items-center gap-1.5 settings-panel-avatar-section">
             {#if avatarUrl}
               <button
                 type="button"

@@ -10,13 +10,30 @@
   }
 
   const searchCache = new Map<string, BookResult[]>();
+  const MAX_CACHE = 50;
+  function cacheSet(key: string, val: BookResult[]) {
+    if (searchCache.has(key)) searchCache.delete(key);
+    if (searchCache.size >= MAX_CACHE) {
+      const first = searchCache.keys().next().value;
+      if (first !== undefined) searchCache.delete(first);
+    }
+    searchCache.set(key, val);
+  }
+  function cacheGet(key: string): BookResult[] | undefined {
+    const val = searchCache.get(key);
+    if (val !== undefined) {
+      searchCache.delete(key);
+      searchCache.set(key, val);
+    }
+    return val;
+  }
 </script>
 
 <script lang="ts">
   import { db, type ReadingLog } from '$lib/db';
-  import { X, Star, Check, BookMarked, Trash2 } from '@lucide/svelte';
+  import { X, Star, Check, BookMarked, Trash2, ArrowLeft } from '@lucide/svelte';
 
-  let { searchQuery = '', onselect, searchExpanded = false }: { searchQuery?: string; onselect?: () => void; searchExpanded?: boolean } = $props();
+  let { searchQuery = '', onselect, searchExpanded = false, bookSelected = $bindable(false) }: { searchQuery?: string; onselect?: () => void; searchExpanded?: boolean; bookSelected?: boolean } = $props();
 
   let searchResults = $state<BookResult[]>([]);
   let searchLoading = $state(false);
@@ -32,6 +49,7 @@
 
   let searchStatus = $derived.by(() => {
     if (searchPhase === 'contacting') return `OpenLibrary · ${elapsed.toFixed(1)}s`;
+    if (searchPhase === 'debouncing') return 'OpenLibrary · 0.0s';
     if (searchPhase === 'error') return 'OpenLibrary · Failed!';
     if (searchPhase === 'done') {
       if (searchResults.length === 0) return `OpenLibrary · ${fetchDuration.toFixed(1)}s · 0 Results`;
@@ -39,6 +57,7 @@
     }
     return 'OpenLibrary · Online';
   });
+  let statusActive = $derived(searchPhase !== 'idle' && !(searchPhase === 'done' && searchResults.length === 0));
 
   // Elapsed timer while fetching
   $effect(() => {
@@ -56,6 +75,7 @@
 
   let bookDetails = $state<any>(null);
   let bookDetailsLoading = $state(false);
+  let showCoverLightbox = $state(false);
 
   let reviewText = $state('');
   let rating = $state<number>(0);
@@ -132,12 +152,12 @@
         id: doc.key ?? '',
         title: doc.title ?? 'Untitled',
         author: doc.author_name?.[0] ?? null,
-        coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg` : null,
+        coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null,
         year: doc.first_publish_year ?? null,
         editions: doc.edition_count ?? null,
         publisher: doc.publisher?.[0] ?? null,
       }));
-      searchCache.set(term.toLowerCase().trim(), results);
+      cacheSet(term.toLowerCase().trim(), results);
       searchResults = results;
       selectedIndex = -1;
       fetchDuration = (performance.now() - fetchStartTime) / 1000;
@@ -173,7 +193,7 @@
 
     // Synchronous cache check — no loading flash, results appear same frame
     const cacheKey = q.toLowerCase().trim();
-    const cached = searchCache.get(cacheKey);
+    const cached = cacheGet(cacheKey);
     if (cached) {
       searchResults = cached;
       searchLoading = false;
@@ -220,12 +240,56 @@
 
   $effect(() => {
     if (typeof document === 'undefined') return;
-    document.addEventListener('keydown', onDocKeydown);
-    return () => document.removeEventListener('keydown', onDocKeydown);
+    function onKeydown(e: KeyboardEvent) {
+      if (selectedBook) return;
+      if (searchQuery.trim().length < 2) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (searchResults.length === 0) return;
+        selectedIndex = Math.min(selectedIndex + 1, searchResults.length - 1);
+        document.querySelector(`[data-search-index="${selectedIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (searchResults.length === 0) return;
+        if (selectedIndex <= 0) { selectedIndex = -1; return; }
+        selectedIndex = Math.max(selectedIndex - 1, 0);
+        document.querySelector(`[data-search-index="${selectedIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        if (selectedIndex >= 0 && selectedIndex < searchResults.length) {
+          e.preventDefault();
+          selectBook(searchResults[selectedIndex]);
+        }
+      }
+    }
+    function onPopState() {
+      if (selectedBook) clearSelection();
+    }
+    document.addEventListener('keydown', onKeydown);
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      document.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('popstate', onPopState);
+    };
+  });
+
+  $effect(() => {
+    if (!bookSelected && selectedBook) {
+      clearSelection();
+    }
+  });
+
+  $effect(() => {
+    if (!showCoverLightbox) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') showCoverLightbox = false;
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   });
 
   function selectBook(book: BookResult) {
     selectedBook = book;
+    bookSelected = true;
     showLogForm = false;
     bookDetails = null;
     searchResults = [];
@@ -284,6 +348,7 @@
 
   function clearSelection() {
     selectedBook = null;
+    bookSelected = false;
     editingLog = null;
     showLogForm = false;
     bookDetails = null;
@@ -470,19 +535,13 @@
       </div>
     {:else}
       <div class="diary-info-panel">
-        <div class="diary-info-header">
-          <button type="button" class="diary-back-btn" onclick={clearSelection}>
-            ← Back
-          </button>
-          <h3 class="diary-info-title">Book Details</h3>
-        </div>
 
         {#if bookDetailsLoading}
           <div class="diary-info-loading">Loading details…</div>
         {:else if bookDetails}
           <div class="diary-info-top">
             {#if selectedBook.coverUrl}
-              <img src={selectedBook.coverUrl} alt="" class="diary-info-cover" />
+              <img src={selectedBook.coverUrl} alt="" class="diary-info-cover" role="button" tabindex="0" onclick={() => showCoverLightbox = true} onkeydown={(e) => { if (e.key === 'Enter') showCoverLightbox = true; }} />
             {:else}
               <div class="diary-info-cover diary-info-cover--empty">
                 <BookMarked class="size-10" aria-hidden="true" />
@@ -498,7 +557,7 @@
                 {#if selectedBook.year && selectedBook.publisher}<span class="diary-info-dot" />{/if}
                 {#if selectedBook.publisher}<span>{selectedBook.publisher}</span>{/if}
                 {#if (selectedBook.year || selectedBook.publisher) && selectedBook.editions}<span class="diary-info-dot" />{/if}
-                {#if selectedBook.editions}<span>{selectedBook.editions} editions</span>{/if}
+                {#if selectedBook.editions}<span>{selectedBook.editions} {selectedBook.editions === 1 ? 'edition' : 'editions'}</span>{/if}
               </div>
             </div>
           </div>
@@ -557,12 +616,25 @@
           <div class="diary-info-loading">Could not load book details.</div>
         {/if}
       </div>
+
+      {#if showCoverLightbox && selectedBook.coverUrl}
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div class="diary-cover-overlay" onclick={() => showCoverLightbox = false} role="dialog" aria-modal="true" aria-label="Book cover">
+          <img src={selectedBook.coverUrl.replace('-M.jpg', '-L.jpg')} alt="" class="diary-cover-full" onclick={(e) => e.stopPropagation()} />
+        </div>
+      {/if}
     {/if}
   {:else}
     <div class="search-results-box" class:search-results-box--open={searchExpanded}>
-      <div class="diary-status" class:diary-status--error={searchPhase === 'error'}><span class="diary-status-dot" class:diary-status-dot--error={searchPhase === 'error'} />{searchStatus}</div>
+      <div class="search-results-box__inner">
+        <div class="diary-status" class:diary-status--active={statusActive} class:diary-status--error={searchPhase === 'error'}><span class="diary-status-dot" class:diary-status-dot--error={searchPhase === 'error'} />{searchStatus}</div>
 
-      {#if searchQuery.trim().length >= 2}
+      {#if searchPhase === 'error'}
+        <div class="diary-error-retry-wrap">
+          <button type="button" class="diary-retry-btn" onclick={() => void doSearch(searchQuery)}>Retry</button>
+        </div>
+      {/if}
+
         {#if searchLoading}
           <div class="diary-results diary-results--loading">
             {#each [1, 2, 3, 4, 5] as _}
@@ -612,7 +684,7 @@
             {/each}
           </div>
         {/if}
-      {/if}
+      </div>
     </div>
   {/if}
 </div>
@@ -646,17 +718,20 @@
   }
 
   .search-results-box {
-    max-height: 0;
+    display: grid;
+    grid-template-rows: 0fr;
     opacity: 0;
-    overflow: hidden;
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 0.4rem 0.6rem;
-    transition: max-height 0.25s ease-out, opacity 0.2s ease-out, margin 0.25s ease-out;
+    transition: grid-template-rows 0.3s ease-out, opacity 0.2s ease-out, margin 0.3s ease-out;
     margin: 0;
   }
+  .search-results-box__inner {
+    overflow: hidden;
+    padding: 0.4rem 0.6rem;
+  }
   .search-results-box--open {
-    max-height: 500px;
+    grid-template-rows: 1fr;
     opacity: 1;
     margin: 4px 0;
   }
@@ -664,11 +739,15 @@
   .diary-status {
     font-size: 10px;
     color: var(--hint);
-    padding: 0.1rem 0;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 0.2rem;
+    padding: 0.1rem 0 0.05rem;
+    margin-bottom: 0.1rem;
     display: flex;
     align-items: center;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s ease;
+  }
+  .diary-status--active {
+    border-bottom-color: var(--border);
   }
   .diary-status--error {
     color: #ef4444;
@@ -686,7 +765,24 @@
     background: #ef4444;
     box-shadow: 0 0 4px #ef4444;
   }
-
+  .diary-error-retry-wrap {
+    display: flex;
+    justify-content: center;
+    padding: 0.5rem 0;
+  }
+  .diary-retry-btn {
+    font-size: 11px;
+    padding: 4px 14px;
+    border-radius: 6px;
+    border: 0.5px solid var(--border);
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .diary-retry-btn:hover {
+    background: var(--surf);
+  }
   /* ── Skeleton ── */
   @keyframes shimmer {
     0% { background-position: -200px 0; }
@@ -907,23 +1003,36 @@
     margin: 0;
   }
 
-  /* Book Info Panel */
+  /* ── Book Info Panel ── */
   .diary-info-panel {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    font-family: var(--font-serif);
+    gap: 1.25rem;
   }
-  .diary-info-header {
+  .diary-info-sub {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    padding: 0.25rem 0 0.4375rem;
+    border-top: 0.5px solid var(--rule);
+    border-bottom: 0.5px solid var(--rule);
+    margin-bottom: 0.25rem;
   }
-  .diary-info-title {
-    font-size: 14px;
-    font-weight: 600;
+  .diary-info-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    border: none;
+    background: transparent;
+    font-family: var(--ui);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--hint);
+    cursor: pointer;
+    padding: 0.125rem 0;
+    transition: color 120ms ease;
+  }
+  .diary-info-back-btn:hover {
     color: var(--ink);
-    margin: 0;
   }
   .diary-info-loading {
     font-size: 12px;
@@ -933,77 +1042,97 @@
   }
   .diary-info-top {
     display: flex;
-    gap: 14px;
+    gap: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
   }
   .diary-info-cover {
-    width: 80px;
-    height: 120px;
+    width: 96px;
+    height: 144px;
     object-fit: cover;
-    border-radius: 6px;
+    border-radius: 8px;
     flex-shrink: 0;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    background: var(--surf);
   }
   .diary-info-cover--empty {
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--hint);
-    background: var(--surf);
   }
   .diary-info-top-text {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 0.375rem;
     min-width: 0;
+    justify-content: center;
   }
   .diary-info-title-text {
-    font-size: 16px;
+    font-size: 1.1rem;
     font-weight: 600;
     color: var(--ink);
     line-height: 1.3;
-    font-family: var(--font-logo, var(--font-serif));
+    font-family: var(--dm);
   }
   .diary-info-author {
-    font-size: 13px;
-    color: var(--hint);
-    font-family: var(--font-serif);
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-family: var(--ss);
   }
   .diary-info-meta-line {
-    font-size: 11px;
-    color: var(--text-muted);
+    font-size: 0.7rem;
+    color: var(--hint);
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0;
-    font-family: var(--font-serif);
+    font-family: var(--ui);
+    margin-top: 0.125rem;
   }
   .diary-info-dot {
     display: inline-block;
     width: 3px;
     height: 3px;
     border-radius: 50%;
-    background: currentColor;
-    margin: 0 0.4em;
+    background: var(--hint);
+    margin: 0 0.45em;
     vertical-align: middle;
   }
   .diary-info-section {
-    margin-top: 0.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
   }
   .diary-info-section-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--ink);
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--hint);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.3rem;
-    font-family: var(--font-serif);
+    letter-spacing: 0.08em;
+    font-family: var(--ui);
   }
   .diary-info-description {
-    font-size: 12px;
-    color: var(--text-muted);
-    line-height: 1.55;
-    max-height: 120px;
+    font-size: 0.8rem;
+    color: var(--text);
+    line-height: 1.6;
+    font-family: var(--ss);
+    max-height: 300px;
     overflow-y: auto;
-    font-family: var(--font-serif);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .diary-info-description::-webkit-scrollbar {
+    width: 5px;
+  }
+  .diary-info-description::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .diary-info-description::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+  .diary-info-description::-webkit-scrollbar-thumb:hover {
+    background: var(--hint);
   }
   .diary-info-missing {
     color: var(--hint);
@@ -1012,23 +1141,29 @@
   .diary-info-details-grid {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.75rem;
   }
   .diary-info-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 5px;
   }
   .diary-info-tag {
-    font-size: 10px;
-    color: var(--hint);
+    font-size: 0.65rem;
+    color: var(--text-muted);
     background: var(--surf);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 3px 8px;
+    border-radius: 6px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 220px;
+    max-width: 200px;
+    font-family: var(--ui);
+    border: 0.5px solid var(--border);
+    transition: background 0.12s;
+  }
+  .diary-info-tag:hover {
+    background: var(--card);
   }
   .diary-log-btn {
     display: flex;
@@ -1036,17 +1171,21 @@
     justify-content: center;
     gap: 6px;
     width: 100%;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
+    padding: 0.625rem;
     border-radius: 8px;
-    background: transparent;
-    color: var(--accent);
-    font-size: 12px;
+    border: none;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: var(--ui);
     cursor: pointer;
-    transition: background 0.1s;
+    letter-spacing: 0.02em;
+    transition: opacity 0.15s;
+    margin-top: 0.25rem;
   }
   .diary-log-btn:hover {
-    background: var(--surf);
+    opacity: 0.85;
   }
 
   .diary-entry-book {
@@ -1315,6 +1454,37 @@
   }
   .diary-log-delete--confirm:hover {
     background: rgba(239, 68, 68, 0.2);
+  }
+
+  /* ── Cover Lightbox ── */
+  .diary-cover-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.7);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    animation: diary-overlay-in 0.2s ease-out;
+  }
+  @keyframes diary-overlay-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .diary-cover-full {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 12px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+    animation: diary-cover-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  @keyframes diary-cover-pop {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
   }
 </style>
 
