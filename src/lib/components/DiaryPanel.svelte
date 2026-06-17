@@ -5,6 +5,8 @@
     author: string | null;
     coverUrl: string | null;
     year: number | null;
+    editions: number | null;
+    publisher: string | null;
   }
 
   const searchCache = new Map<string, BookResult[]>();
@@ -114,7 +116,7 @@
     searchPhase = 'contacting';
     try {
       const solrQ = buildFuzzyQuery(term);
-      const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(solrQ)}&limit=16&fields=key,title,author_name,cover_i,first_publish_year`;
+      const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(solrQ)}&limit=16&fields=key,title,author_name,cover_i,first_publish_year,edition_count,publisher`;
       const res = await fetch(url, { signal: ctrl.signal });
       clearTimeout(timeout);
       if (!res.ok) {
@@ -128,6 +130,8 @@
         author: doc.author_name?.[0] ?? null,
         coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-S.jpg` : null,
         year: doc.first_publish_year ?? null,
+        editions: doc.edition_count ?? null,
+        publisher: doc.publisher?.[0] ?? null,
       }));
       searchCache.set(term.toLowerCase().trim(), results);
       searchResults = results;
@@ -239,6 +243,8 @@
       author: log.author,
       coverUrl: log.cover_url,
       year: null,
+      editions: null,
+      publisher: null,
     };
     reviewText = log.review || '';
     rating = log.rating || 0;
@@ -475,6 +481,10 @@
                   {#if book.author}
                     <div class="diary-result-author">{@html highlightMatch(book.author, searchQuery)}{#if book.year} · {book.year}{/if}</div>
                   {/if}
+                  <div class="diary-result-meta">
+                    {#if book.editions}{book.editions} ed.{/if}
+                    {#if book.publisher}{#if book.editions} · {/if}{book.publisher}{/if}
+                  </div>
                 </div>
               </button>
             {/each}
@@ -726,6 +736,14 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .diary-result-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
   }
 
   /* Entry Form */
