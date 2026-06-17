@@ -882,6 +882,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    font-family: var(--font-serif);
   }
 
   .diary-entry-form-header {
@@ -911,6 +912,7 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
+    font-family: var(--font-serif);
   }
   .diary-info-header {
     display: flex;
@@ -958,10 +960,12 @@
     font-weight: 600;
     color: var(--ink);
     line-height: 1.3;
+    font-family: var(--font-logo, var(--font-serif));
   }
   .diary-info-author {
     font-size: 13px;
     color: var(--hint);
+    font-family: var(--font-serif);
   }
   .diary-info-meta-line {
     font-size: 11px;
@@ -970,6 +974,7 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0;
+    font-family: var(--font-serif);
   }
   .diary-info-dot {
     display: inline-block;
@@ -990,6 +995,7 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: 0.3rem;
+    font-family: var(--font-serif);
   }
   .diary-info-description {
     font-size: 12px;
@@ -997,6 +1003,7 @@
     line-height: 1.55;
     max-height: 120px;
     overflow-y: auto;
+    font-family: var(--font-serif);
   }
   .diary-info-missing {
     color: var(--hint);
