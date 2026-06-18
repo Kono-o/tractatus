@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { fly } from 'svelte/transition';
+  import { fly, fade } from 'svelte/transition';
   import { goto } from '$app/navigation';
   import GeneratedAvatar from '$lib/components/GeneratedAvatar.svelte';
   import {
@@ -212,7 +212,7 @@
     } finally {
       readingEssayLoading = false;
     }
-    history.pushState(null, '', `/${encodeURIComponent(uname)}/${encodeURIComponent(essay.slug)}/`);
+    history.pushState(null, '', `/@${encodeURIComponent(uname)}/${encodeURIComponent(essay.slug)}/`);
   }
 
   function handleHeaderBack() {
@@ -237,13 +237,6 @@
   let isAuthLoading = $state(true);
   let isLoading = $state(false);
   let hasInitialLoad = $state(false);
-  let bootMessage = $state('Checking session…');
-  let showBootScreen = $derived(currentUser !== null && (isAuthLoading || isLoading));
-  let bootOverlayVisible = $state(false);
-  let bootOverlayExiting = $state(false);
-  let bootAccountReveal = $state(false);
-  let stageRevealActive = $state(false);
-  const BOOT_ACCOUNT_REVEAL_HOLD_MS = 900;
 
   // Account / settings panel (ported from Lift Tracker)
   let showSettingsPanel = $state(false);
@@ -258,6 +251,22 @@
   let avatarRemoveTapPulseActive = $state(false);
   let avatarRemoveHoldTimer: ReturnType<typeof setInterval> | undefined;
   let avatarRemoveHoldEndTimer: ReturnType<typeof setTimeout> | undefined;
+  let showUserIcon = $state(true);
+  let showAvatar = $state(false);
+
+  $effect(() => {
+    if (!isAuthLoading) {
+      if (currentUser) {
+        if (hasInitialLoad) {
+          showAvatar = true;
+          showUserIcon = false;
+        }
+      } else {
+        showUserIcon = true;
+        showAvatar = false;
+      }
+    }
+  });
 
   let accountBusy = $state(false);
   let accountError = $state<string | null>(null);
@@ -596,77 +605,21 @@
     return _updaterMod;
   }
 
-  function onBootOverlayTransitionEnd(e: TransitionEvent) {
-    if (e.propertyName !== 'opacity' || !bootOverlayExiting) return;
-    bootOverlayVisible = false;
-    bootOverlayExiting = false;
-    bootAccountReveal = false;
-  }
 
   $effect(() => {
-    if (showBootScreen) {
-      bootOverlayVisible = true;
-      bootOverlayExiting = false;
-      bootAccountReveal = false;
-      return;
-    }
-    let cancelled = false;
-    let revealHoldTimer: ReturnType<typeof setTimeout> | undefined;
-    let exitFallbackTimer: ReturnType<typeof setTimeout> | undefined;
-    bootAccountReveal = false;
-
-    if (!currentUser) {
-      bootOverlayVisible = false;
-      bootOverlayExiting = false;
-      void tick().then(() => {
-        if (cancelled) return;
-        stageRevealActive = true;
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void (async () => {
-      await tick();
-      if (cancelled) return;
-      await preloadSupabaseBackend();
-      if (cancelled) return;
-      stageRevealActive = true;
-      bootAccountReveal = true;
-      revealHoldTimer = setTimeout(() => {
-        if (cancelled) return;
-        bootOverlayExiting = true;
-        exitFallbackTimer = setTimeout(() => {
-          if (cancelled || !bootOverlayExiting) return;
-          bootOverlayVisible = false;
-          bootOverlayExiting = false;
-          bootAccountReveal = false;
-        }, 340);
-      }, BOOT_ACCOUNT_REVEAL_HOLD_MS);
-    })();
-
-    return () => {
-      cancelled = true;
-      if (revealHoldTimer) clearTimeout(revealHoldTimer);
-      if (exitFallbackTimer) clearTimeout(exitFallbackTimer);
-    };
   });
+
 
   async function loadAppData() {
     if (!currentUser) return;
     const isInitial = !hasInitialLoad;
     if (isInitial) {
       isLoading = true;
-      bootMessage = 'Loading your account…';
     }
     try {
-      bootMessage = 'Syncing backend…';
       await Promise.all([loadAvatarSeed(), loadAvatarUrl(), preloadSupabaseBackend()]);
-      if (isInitial) bootMessage = 'Almost ready…';
     } catch (e) {
       console.error(e);
-      if (isInitial) bootMessage = 'Sync failed — retrying when ready…';
     } finally {
       isLoading = false;
       hasInitialLoad = true;
@@ -676,7 +629,7 @@
   async function runStartupUpdateCheck() {
     if (didRunStartupUpdateCheck) return;
     if (!isNativeApp() || !currentUser) return;
-    if (!hasInitialLoad || !stageRevealActive || isLoading || bootOverlayVisible || showBootScreen) return;
+    if (!hasInitialLoad || isLoading || (currentUser !== null && (isAuthLoading || isLoading))) return;
     didRunStartupUpdateCheck = true;
 
     setTimeout(() => {
@@ -733,7 +686,6 @@
 
         if (currentUser && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
           if (!hasInitialLoad) {
-            bootMessage = 'Welcome back — loading data…';
             void loadAppData();
           }
         }
@@ -742,7 +694,6 @@
           hasInitialLoad = false;
           isLoading = false;
           supabasePanel = null;
-          bootMessage = 'Checking session…';
         }
       })();
     });
@@ -797,7 +748,7 @@
   });
 
   $effect(() => {
-    if (currentUser && hasInitialLoad && stageRevealActive && !bootOverlayVisible && !showBootScreen && !didRunStartupUpdateCheck) {
+    if (currentUser && hasInitialLoad && !isAuthLoading && !isLoading && !didRunStartupUpdateCheck) {
       void runStartupUpdateCheck();
     }
   });
@@ -1247,24 +1198,22 @@
       editingAccountName = false;
       return;
     }
+    editingAccountName = false;
+    accountNameEditValue = '';
     accountBusy = true;
     accountError = null;
     try {
       await db.renameUsername(newName);
-      // refresh user
       const refreshed = await db.getCurrentUser();
       if (refreshed) {
-        // note: in full app we'd update a shared currentUser, here we trigger re-load in parent effect if needed
-        // for simplicity re-assign
         currentUser = refreshed as any;
       }
-      await db.saveAvatarSeed(avatarSeed); // preserve seed on rename
+      await db.saveAvatarSeed(avatarSeed);
+      void loadAvatarUrl();
     } catch (e: any) {
       accountError = formatAccountError(e);
     } finally {
       accountBusy = false;
-      editingAccountName = false;
-      accountNameEditValue = '';
     }
   }
 
@@ -2257,11 +2206,12 @@
           <span
             class="pub-header-logo-text"
             class:pub-header-logo-text--hidden={searchExpanded && !articleMode && !writingMode}
+            class:pub-header-logo-text--disabled={isAuthLoading || isLoading}
             aria-hidden={searchExpanded && !writingMode && !articleMode || undefined}
             role="button"
-            tabindex="0"
-            onclick={() => { if (writingMode) { void exitWriting(); } else if (articleMode) { closeArticle(); } }}
-            onkeydown={(e) => { if (e.key === 'Enter') { if (writingMode) { void exitWriting(); } else if (articleMode) { closeArticle(); } } }}
+            tabindex={(isAuthLoading || isLoading) ? -1 : 0}
+            onclick={() => { if (isAuthLoading || isLoading) return; if (writingMode) { void exitWriting(); } else if (articleMode) { closeArticle(); } }}
+            onkeydown={(e) => { if (e.key === 'Enter') { if (isAuthLoading || isLoading) return; if (writingMode) { void exitWriting(); } else if (articleMode) { closeArticle(); } } }}
           >Tractatus</span>
         </div>
       </div>
@@ -2275,9 +2225,9 @@
           inert={articleMode || undefined}
         >
           <div class="pub-header-search-slot-inner">
-            <span class="pub-header-search-slot-icon" aria-hidden="true">
-              <span class="pub-header-search-slot-icon__item" class:pub-header-search-slot-icon__item--active={!searchQuery.trim()}><Search class="size-3.5" /></span>
-              <span class="pub-header-search-slot-icon__item" class:pub-header-search-slot-icon__item--active={searchQuery.trim().length > 0}><X class="size-3.5" /></span>
+            <span class="pub-header-search-slot-icon">
+              <span class="pub-header-search-slot-icon__item" class:pub-header-search-slot-icon__item--active={!searchQuery.trim()} aria-hidden="true"><Search class="size-3.5" /></span>
+              <button type="button" class="pub-header-search-slot-icon__item pub-header-search-slot-icon__clear" class:pub-header-search-slot-icon__item--active={searchQuery.trim().length > 0} onclick={() => { searchQuery = ''; onSearchInput(''); searchInputEl?.focus(); }} aria-label="Clear search"><X class="size-3.5" /></button>
             </span>
             <input
               bind:this={searchInputEl}
@@ -2321,27 +2271,41 @@
             {isPublished ? 'Public' : 'Draft'}
           </button>
         {/if}
-        {#if currentUser}
-          <button
-            type="button"
-            class="pub-header-icon-btn pub-header-avatar"
-            onclick={openSettingsPanel}
-            aria-label="Account and settings"
-          >
-          {#key avatarSeed + '' + avatarUrl}
-            <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={28} rounded={20} />
-          {/key}
+        <button
+          type="button"
+          class="pub-header-icon-btn"
+          class:pub-header-avatar={!!currentUser}
+          class:pub-header-guest-btn={!currentUser}
+          onclick={currentUser ? openSettingsPanel : openAuthPanel}
+          aria-label={currentUser ? 'Account and settings' : 'Sign in or sign up'}
+        >
+          <div style="position: relative; width: 28px; height: 28px; flex-shrink: 0; overflow: hidden;">
+            {#if showUserIcon}
+              <div transition:fade={{ duration: 280 }}>
+                <div class="flex items-center justify-center" style="width: 28px; height: 28px;">
+                  <User class="size-3.5" aria-hidden="true" />
+                </div>
+              </div>
+            {/if}
+            {#if showAvatar && avatarUrl}
+              <div transition:fade={{ duration: 280 }} style="position: absolute; inset: 0; border-radius: 5.6px; overflow: hidden; box-shadow: 0 0 0 1px var(--rule2);">
+                <img
+                  src={avatarUrl}
+                  width={28}
+                  height={28}
+                  loading="lazy"
+                  alt=""
+                  style="width: 100%; height: 100%; object-fit: cover; border-radius: 5.6px;"
+                />
+              </div>
+            {/if}
+            {#if showAvatar && !avatarUrl}
+              <div transition:fade={{ duration: 280 }}>
+                <GeneratedAvatar userId={currentUser?.id ?? ''} seed={avatarSeed} avatarUrl={null} size={28} rounded={20} />
+              </div>
+            {/if}
+          </div>
         </button>
-        {:else}
-          <button
-            type="button"
-            class="pub-header-icon-btn pub-header-guest-btn"
-            onclick={openAuthPanel}
-            aria-label="Sign in or sign up"
-          >
-            <User class="size-3.5" aria-hidden="true" />
-          </button>
-        {/if}
       </div>
     </header>
 
@@ -2414,7 +2378,7 @@
       <span class="pub-feed-card-meta-right">
         <span class="pub-feed-card-readtime">{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
         <span class="relative inline-flex items-center">
-          <span role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username || '')}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username || '')}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
+          <span role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username || '')}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username || '')}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
             {#if feedLinkCopiedId === essay.id}
               <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
             {/if}
@@ -2472,147 +2436,12 @@
   </div>
 {/snippet}
 
-{#snippet bootScreen()}
-  {@const panel = supabasePanel}
-  <div
-    class="settings-panel-dialog boot-panel-dialog rounded-xl shadow-xl overflow-hidden text-left"
-    class:boot-panel-reveal--active={bootAccountReveal}
-    role="status"
-    aria-live="polite"
-    aria-busy={!bootAccountReveal}
-    aria-label={bootAccountReveal ? 'Account ready' : bootMessage}
-  >
-    <div class="settings-panel-header">
-      {@render panelHeaderRow()}
-      <button
-        type="button"
-        class="settings-panel-header__close"
-        disabled
-        aria-hidden="true"
-        tabindex="-1"
-      >
-        <X class="size-3.5" />
-      </button>
-    </div>
-
-    <div class="settings-panel-body text-[10px] leading-snug">
-      {#if bootAccountReveal && currentUser && panel}
-        <div class="flex flex-col items-center gap-0.5 pb-0.5 boot-panel-reveal-item boot-panel-reveal-item--avatar">
-          {#key avatarSeed + '' + avatarUrl}
-            <GeneratedAvatar userId={currentUser.id} seed={avatarSeed} avatarUrl={avatarUrl} size={80} />
-          {/key}
-          <span class="settings-panel-header__name">{accountDisplayName}</span>
-          <span class="text-[10px] text-zinc-500 leading-none settings-panel-joined">joined {accountMemberSince}</span>
-          <span class="settings-panel-header__user-id leading-none" title={currentUser.id}>{currentUser.id}</span>
-        </div>
-
-        <div class="settings-panel-stats">
-          <div class="boot-panel-reveal-item boot-panel-reveal-item--identity">
-
-          {@render writingsChip(false, true)}
-
-          {#if panel.health.error || panel.sessionError}
-            <p class="settings-panel-alert boot-panel-reveal-item boot-panel-reveal-item--chips">
-              {panel.sessionError ?? panel.health.error}
-            </p>
-          {/if}
-          </div>
-        </div>
-
-        <div class="settings-panel-account boot-panel-reveal-item boot-panel-reveal-item--actions">
-          {#if accountCanChangePassword}
-            <div class="settings-panel-password">
-              <div class="settings-panel-action-btn settings-panel-action-btn--full settings-panel-action-btn--change-password">
-                <span class="settings-panel-action-btn__label">
-                  <LockKeyhole class="size-3 shrink-0 pointer-events-none" aria-hidden="true" />
-                  CHANGE PASSWORD
-                </span>
-              </div>
-            </div>
-          {/if}
-
-          <div class="settings-panel-actions-reveal settings-panel-actions-reveal--open">
-            <div class="settings-panel-actions-reveal__inner">
-              <div class="settings-panel-actions">
-                <div class="settings-panel-action-btn settings-panel-action-btn--signout">
-                  <span class="settings-panel-action-btn__label">
-                    <LogOut class="size-3 shrink-0 pointer-events-none" aria-hidden="true" />
-                    SIGN OUT
-                  </span>
-                </div>
-                <div class="settings-panel-action-btn settings-panel-action-btn--delete">
-                  <span class="settings-panel-action-btn__label">
-                    <Trash2 class="size-3 shrink-0 pointer-events-none" aria-hidden="true" />
-                    DELETE
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      {:else}
-        <div class="flex flex-col items-center gap-0.5 pb-0.5">
-          <div class="boot-panel-avatar-spinner" aria-hidden="true"></div>
-          <span class="settings-panel-header__name boot-panel-placeholder__ghost">account name</span>
-          <span class="text-[10px] boot-panel-placeholder__ghost leading-none settings-panel-joined">joined Jan 2026</span>
-          <span class="settings-panel-header__user-id boot-panel-placeholder__ghost leading-none">00000000-0000-0000-0000-000000000000</span>
-        </div>
-
-        <div class="settings-panel-stats">
-          <div class="boot-panel-placeholder" aria-hidden="true">
-          </div>
-
-          {@render writingsChip(true)}
-        </div>
-
-        <div class="settings-panel-account" aria-hidden="true">
-          <div class="settings-panel-password">
-            <div class="settings-panel-action-btn settings-panel-action-btn--full settings-panel-action-btn--change-password boot-panel-placeholder">
-              <span class="settings-panel-action-btn__label boot-panel-placeholder__ghost">
-                <LockKeyhole class="size-3 shrink-0 pointer-events-none" aria-hidden="true" />
-                CHANGE PASSWORD
-              </span>
-            </div>
-          </div>
-
-          <div class="settings-panel-actions-reveal settings-panel-actions-reveal--open">
-            <div class="settings-panel-actions-reveal__inner">
-              <div class="settings-panel-actions">
-                <div class="settings-panel-action-btn settings-panel-action-btn--signout boot-panel-placeholder">
-                  <span class="settings-panel-action-btn__label boot-panel-placeholder__ghost">
-                    <LogOut class="size-3 shrink-0 pointer-events-none" aria-hidden="true" />
-                    SIGN OUT
-                  </span>
-                </div>
-                <div class="settings-panel-action-btn settings-panel-action-btn--delete boot-panel-placeholder">
-                  <span class="settings-panel-action-btn__label boot-panel-placeholder__ghost">
-                    <Trash2 class="size-3 shrink-0 pointer-events-none" aria-hidden="true" />
-                    DELETE
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      {/if}
-    </div>
-
-    <p class="sr-only">{bootAccountReveal ? 'Account ready' : bootMessage}</p>
-  </div>
-{/snippet}
-
-<div class="app w-full h-dvh max-h-dvh overflow-hidden select-none flex flex-col font-sans" class:app--pub={!isAuthLoading}>
+<div class="app app--pub w-full h-dvh max-h-dvh overflow-hidden select-none flex flex-col font-sans">
   <div class="app-stage flex-1 flex flex-col min-h-0 w-full relative overflow-hidden">
   <div class="app-stage-scroll flex-1 min-h-0 flex flex-col overflow-hidden">
   <div
-    class="app-stage-reveal app-stack-gap flex flex-col flex-1 min-h-0 w-full overflow-hidden"
-    class:app-stage-reveal--active={stageRevealActive || !isAuthLoading}
+    class="app-stage-reveal app-stage-reveal--active app-stack-gap flex flex-col flex-1 min-h-0 w-full overflow-hidden"
   >
-  {#if isAuthLoading}
-    <div class="app-loading flex-1 min-h-0 flex items-center justify-center">
-      <div class="boot-panel-avatar-spinner" style="width: 2.25rem; height: 2.25rem; border-width: 3px;"></div>
-    </div>
-  {:else}
   <div class="pub-shell flex flex-col flex-1 min-h-0 w-full overflow-hidden">
     {@render compactHeader(isWriting, !!readingEssay)}
 
@@ -2658,28 +2487,33 @@
         class="pub-view-tab"
         class:pub-view-tab--active={viewMode === 'feed'}
         onclick={selectFeedTab}
+        disabled={isAuthLoading || isLoading}
       >
         <Newspaper class="pub-view-tab-icon size-3.5" aria-hidden="true" />
         Feed
+      </button>
+      <button
+        type="button"
+        class="pub-view-tab"
+        class:pub-view-tab--active={viewMode === 'diary'}
+        onclick={selectDiaryTab}
+        disabled={isAuthLoading || isLoading}
+      >
+        <BookOpen class="pub-view-tab-icon size-3.5" aria-hidden="true" />
+        Books
       </button>
       {#if currentUser}
         <button
           type="button"
           class="pub-view-tab"
-          class:pub-view-tab--active={viewMode === 'diary'}
-          onclick={selectDiaryTab}
-        >
-          <BookOpen class="pub-view-tab-icon size-3.5" aria-hidden="true" />
-          Books
-        </button>
-        <button
-          type="button"
-          class="pub-view-tab"
           class:pub-view-tab--active={viewMode === 'library'}
           onclick={selectMyLibraryTab}
+          disabled={isAuthLoading || isLoading}
+          in:fade={{ duration: 280 }}
+          style="margin-left: auto"
         >
           <LibraryIcon class="pub-view-tab-icon size-3.5" aria-hidden="true" />
-          My Library
+          My Shelf
         </button>
       {/if}
     </nav>
@@ -2687,7 +2521,7 @@
     {/if}
 
   {#if viewMode === 'diary'}
-    <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
+    <div class="pub-scroll no-scrollbar">
       {#if currentUser}
         <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} bind:bookSelected onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} />
       {:else}
@@ -2698,7 +2532,7 @@
       {/if}
     </div>
   {:else if currentUser && viewMode === 'library'}
-    <div class="pub-scroll no-scrollbar" in:fly={{ x: 6, duration: 160, opacity: 1 }}>
+    <div class="pub-scroll no-scrollbar">
       {#if essaysLoading && !essaysLoadedOnce}
         <div class="pub-empty">Loading your writings…</div>
       {:else if filteredLibraryEssays.length === 0}
@@ -2739,7 +2573,7 @@
                   <div class="library-card-footer">
                     <span>{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
                     {#if essay.is_public && essay.author_username}
-                      <span role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
+                      <span role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
                         {#if feedLinkCopiedId === essay.id}
                           <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
                         {/if}
@@ -2781,7 +2615,6 @@
       ontouchstart={feedTouchStart}
       ontouchmove={feedTouchMove}
       ontouchend={feedTouchEnd}
-      in:fly={{ x: -6, duration: 160, opacity: 1 }}
     >
       {#if feedPullY > 0 || feedRefreshing}
         <div class="pub-feed-pull-indicator" style="height: {feedRefreshing ? 32 : feedPullY}px;">
@@ -2789,11 +2622,10 @@
             <svg class="pub-feed-spinner" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
               <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" />
             </svg>
-            <span class="pub-feed-pull-label">Refreshing…</span>
-          {:else if feedPullY > 60}
-            <span class="pub-feed-pull-label">Release to refresh</span>
           {:else}
-            <span class="pub-feed-pull-label">Pull to refresh</span>
+            <svg class="pub-feed-spinner" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="opacity: {Math.min(feedPullY / 60, 1)};">
+              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" />
+            </svg>
           {/if}
         </div>
       {/if}
@@ -2829,12 +2661,17 @@
             </article>
           {/each}
         {/if}
+      {:else if isAuthLoading || isLoading}
+        <div class="pub-feed-loading">
+          <svg class="pub-feed-spinner" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" />
+          </svg>
+        </div>
       {:else if publicFeedLoading && !feedRefreshing}
         <div class="pub-feed-loading">
           <svg class="pub-feed-spinner" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" />
           </svg>
-          <span>Refreshing…</span>
         </div>
       {:else if publicFeed.length === 0}
         <div class="pub-empty">
@@ -2853,6 +2690,7 @@
             {@render feedCard(item)}
           </article>
         {/each}
+        <div class="pub-feed-end">- x -</div>
       {/if}
     </div>
   {/if}
@@ -2865,23 +2703,14 @@
         type="button"
         class="pub-write-fab"
         onclick={handleWriteFabClick}
+        disabled={isAuthLoading || isLoading}
         aria-label={currentUser ? 'Write new essay' : 'Sign in to write'}
       >
         <Plus class="size-8" aria-hidden="true" />
       </button>
     {/if}
   </div>
-  {/if}
 
-  {#if bootOverlayVisible && currentUser}
-    <div
-      class="boot-overlay"
-      class:boot-overlay--exit={bootOverlayExiting}
-      ontransitionend={onBootOverlayTransitionEnd}
-    >
-      {@render bootScreen()}
-    </div>
-  {/if}
   </div>
   </div>
   </div>
@@ -3057,7 +2886,11 @@
             <p class="settings-panel-loading">Loading backend…</p>
           {:else if supabasePanel}
             {@const panel = supabasePanel}
-            {#if currentUser}
+        {#if isAuthLoading}
+          <span class="pub-header-icon-btn pub-header-avatar flex items-center justify-center">
+            <RefreshCw class="size-4 animate-spin" style="color: var(--hint);" aria-hidden="true" />
+          </span>
+        {:else if currentUser}
               <div class="settings-panel-header__identity">
                 {#if editingAccountName && isUsernameAccount(currentUser)}
                   <input
@@ -3325,7 +3158,7 @@
   </div>
 {/if}
 
-{#if showUpdatePrompt && updateInfo && !bootOverlayVisible && (currentUser || !isNativeApp())}
+{#if showUpdatePrompt && updateInfo && (currentUser || !isNativeApp())}
   <div
     class="settings-panel-overlay"
     role="dialog"
@@ -3433,7 +3266,7 @@
   </div>
 {/if}
 
-{#if showPostUpdate && !bootOverlayVisible && (currentUser || !isNativeApp())}
+{#if showPostUpdate && (currentUser || !isNativeApp())}
   <div
     class="settings-panel-overlay"
     role="dialog"

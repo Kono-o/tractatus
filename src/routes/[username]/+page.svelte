@@ -7,7 +7,7 @@
   import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
   import { renderExcerpt } from '$lib/markdown';
 
-  let username = $derived($page.params.username);
+  let username = $derived(($page.params.username).replace(/^@/, ''));
 
   let preview = $derived<{ username: string; avatarUrl: string | null | undefined; avatarSeed: string | null | undefined } | null>(($page.state as any)?.userPreview ?? null);
 
@@ -168,7 +168,7 @@
             <div class="user-profile-essays">
               <div class="user-profile-essays-heading">Essays</div>
               {#each essays as essay (essay.id)}
-                <a href="/{encodeURIComponent(profile.username)}/{encodeURIComponent(essay.slug)}/" class="user-profile-essay">
+                <a href="/@{encodeURIComponent(profile.username)}/{encodeURIComponent(essay.slug)}/" class="user-profile-essay">
                   <div class="user-profile-essay-title">{essay.title || 'Untitled'}</div>
                   <div class="user-profile-essay-meta">
                     {countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}

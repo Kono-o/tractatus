@@ -6,7 +6,7 @@
   import { ArrowLeft, Eye, EyeClosed } from '@lucide/svelte';
   import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
 
-  let username = $derived($page.params.username);
+  let username = $derived(($page.params.username).replace(/^@/, ''));
   let slug = $derived($page.params.slug);
 
   let essay = $state<Essay | null>(null);

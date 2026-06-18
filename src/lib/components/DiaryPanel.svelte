@@ -46,16 +46,21 @@
   let currentAbort: AbortController | null = null;
   let fetchStartTime = 0;
   let elapsed = $state(0);
+  let searchTerm = $state('');
+  let searchPage = $state(1);
+  let hasMore = $state(false);
+  let loadingMore = $state(false);
+  let sentinelEl: HTMLElement | undefined = $state();
 
-  let searchStatus = $derived.by(() => {
-    if (searchPhase === 'contacting') return `OpenLibrary · ${elapsed.toFixed(1)}s`;
-    if (searchPhase === 'debouncing') return 'OpenLibrary · 0.0s';
-    if (searchPhase === 'error') return 'OpenLibrary · Failed!';
+  let searchStatusSuffix = $derived.by(() => {
+    if (searchPhase === 'contacting') return `${elapsed.toFixed(1)}s`;
+    if (searchPhase === 'debouncing') return '0.0s';
+    if (searchPhase === 'error') return 'Failed!';
     if (searchPhase === 'done') {
-      if (searchResults.length === 0) return `OpenLibrary · ${fetchDuration.toFixed(1)}s · 0 Results`;
-      return `OpenLibrary · ${fetchDuration.toFixed(1)}s · ${searchResults.length} Results`;
+      if (searchResults.length === 0) return `${fetchDuration.toFixed(1)}s · 0 Results`;
+      return `${fetchDuration.toFixed(1)}s · ${searchResults.length} Results`;
     }
-    return 'OpenLibrary · Online';
+    return 'Online';
   });
   let statusActive = $derived(searchPhase !== 'idle' && !(searchPhase === 'done' && searchResults.length === 0));
 
@@ -125,7 +130,7 @@
     }).join(' AND ');
   }
 
-  async function doSearch(term: string) {
+  async function doSearch(term: string, page: number = 1) {
     if (term.length < 2) return false;
 
     currentAbort?.abort();
@@ -134,13 +139,15 @@
     currentAbort = ctrl;
     const gen = searchGen;
     searchError = null;
-    searchLoading = true;
-    elapsed = 0;
-    fetchStartTime = performance.now();
-    searchPhase = 'contacting';
+    if (page === 1) {
+      searchLoading = true;
+      elapsed = 0;
+      fetchStartTime = performance.now();
+      searchPhase = 'contacting';
+    }
     try {
       const solrQ = buildFuzzyQuery(term);
-      const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(solrQ)}&limit=16&fields=key,title,author_name,cover_i,first_publish_year,edition_count,publisher`;
+      const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(solrQ)}&limit=16&page=${page}&fields=key,title,author_name,cover_i,first_publish_year,edition_count,publisher`;
       const res = await fetch(url, { signal: ctrl.signal });
       clearTimeout(timeout);
       if (!res.ok) {
@@ -157,22 +164,53 @@
         editions: doc.edition_count ?? null,
         publisher: doc.publisher?.[0] ?? null,
       }));
-      cacheSet(term.toLowerCase().trim(), results);
-      searchResults = results;
+      if (page === 1) {
+        cacheSet(term.toLowerCase().trim(), results);
+        searchResults = results;
+        searchPage = 1;
+        fetchDuration = (performance.now() - fetchStartTime) / 1000;
+        searchPhase = 'done';
+      } else {
+        searchResults = [...searchResults, ...results];
+        searchPage = page;
+      }
+      hasMore = results.length === 16 && searchResults.length < 256;
       selectedIndex = -1;
-      fetchDuration = (performance.now() - fetchStartTime) / 1000;
-      searchPhase = 'done';
     } catch (e: any) {
       clearTimeout(timeout);
       if (e.name === 'AbortError') return false;
-      searchError = e.message;
-      searchResults = [];
-      selectedIndex = -1;
-      searchPhase = 'error';
+      if (page === 1) {
+        searchError = e.message;
+        searchResults = [];
+        selectedIndex = -1;
+        searchPhase = 'error';
+      }
     } finally {
-      if (searchGen === gen) searchLoading = false;
+      if (searchGen === gen && page === 1) searchLoading = false;
     }
     return false;
+  }
+
+  $effect(() => {
+    const el = sentinelEl;
+    if (!el) return;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && hasMore && !loadingMore && searchPhase !== 'error') {
+        void loadMore();
+      }
+    }, { rootMargin: '200px' });
+    obs.observe(el);
+    return () => obs.disconnect();
+  });
+
+  async function loadMore() {
+    if (loadingMore || !hasMore || searchPhase === 'error') return;
+    loadingMore = true;
+    try {
+      await doSearch(searchTerm, searchPage + 1);
+    } finally {
+      loadingMore = false;
+    }
   }
 
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -207,6 +245,7 @@
     searchPhase = 'debouncing';
     searchLoading = true;
     searchSource = null;
+    searchTerm = q;
     if (searchDebounce) clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => void doSearch(q), 30);
 
@@ -627,7 +666,7 @@
   {:else}
     <div class="search-results-box" class:search-results-box--open={searchExpanded}>
       <div class="search-results-box__inner">
-        <div class="diary-status" class:diary-status--active={statusActive} class:diary-status--error={searchPhase === 'error'}><span class="diary-status-dot" class:diary-status-dot--error={searchPhase === 'error'} />{searchStatus}</div>
+        <div class="diary-status" class:diary-status--active={statusActive} class:diary-status--error={searchPhase === 'error'}><span class="diary-status-dot" class:diary-status-dot--error={searchPhase === 'error'} /><span class="diary-status-text"><strong>OpenLibrary</strong> · {searchStatusSuffix}</span></div>
 
       {#if searchPhase === 'error'}
         <div class="diary-error-retry-wrap">
@@ -682,6 +721,13 @@
                 </div>
               </button>
             {/each}
+            <div bind:this={sentinelEl} class="diary-load-more-sentinel">
+              {#if loadingMore}
+                <span class="diary-load-more-spinner" />
+              {:else if hasMore}
+                <button type="button" class="diary-load-more-btn" onclick={loadMore}>Load more</button>
+              {/if}
+            </div>
           </div>
         {/if}
       </div>
@@ -737,6 +783,7 @@
   }
 
   .diary-status {
+    font-family: var(--font-mono);
     font-size: 10px;
     color: var(--hint);
     padding: 0.1rem 0 0.05rem;
@@ -745,6 +792,9 @@
     align-items: center;
     border-bottom: 1px solid transparent;
     transition: border-color 0.15s ease;
+  }
+  .diary-status-text strong {
+    font-weight: 600;
   }
   .diary-status--active {
     border-bottom-color: var(--border);
@@ -942,6 +992,7 @@
     flex: 1;
   }
   .diary-result-title {
+    font-family: var(--font-mono);
     font-size: 12px;
     color: var(--ink);
     white-space: nowrap;
@@ -949,6 +1000,7 @@
     text-overflow: ellipsis;
   }
   .diary-result-author {
+    font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-muted);
     white-space: nowrap;
@@ -966,11 +1018,45 @@
     vertical-align: middle;
   }
   .diary-result-meta {
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--hint);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* ── Load More ── */
+  .diary-load-more-sentinel {
+    display: flex;
+    justify-content: center;
+    padding: 0.5rem 0 0.25rem;
+  }
+  .diary-load-more-btn {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 4px 14px;
+    border-radius: 6px;
+    border: 0.5px solid var(--border);
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .diary-load-more-btn:hover {
+    background: var(--surf);
+  }
+  .diary-load-more-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: diary-spin 0.6s linear infinite;
+  }
+  @keyframes diary-spin {
+    to { transform: rotate(360deg); }
   }
 
   /* Entry Form */

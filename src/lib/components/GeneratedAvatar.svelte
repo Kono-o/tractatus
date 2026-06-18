@@ -36,14 +36,12 @@
     const cellSat = 22 + (h % 20);
     const cellLight = 70 + (h % 14);
 
-    // Background: same hue, nearly desaturated, slightly lighter
     const bgSat = 0 + (h % 10);
     const bgLight = Math.min(97, cellLight + 16);
 
     const cellColor = `oklch(${cellLight / 100} ${cellSat / 100} ${hue})`;
     const bgColor = `oklch(${bgLight / 100} ${bgSat / 100} ${hue})`;
 
-    // Build symmetric 5x5 grid
     const g: boolean[][] = [];
     for (let y = 0; y < GRID_SIZE; y++) {
       const row: boolean[] = [];
@@ -64,7 +62,6 @@
       g.push(mirrored);
     }
 
-    // Flatten cells
     const cells: { x: number; y: number }[] = [];
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {

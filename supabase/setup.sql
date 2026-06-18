@@ -79,6 +79,7 @@ declare
   u text := lower(trim(p_new_username));
   old_u text;
   v_seed text;
+  v_url text;
   new_email text;
 begin
   if uid is null then
@@ -88,7 +89,7 @@ begin
     raise exception 'Invalid username';
   end if;
 
-  select username, avatar_seed into old_u, v_seed
+  select username, avatar_seed, avatar_url into old_u, v_seed, v_url
   from public.usernames
   where user_id = uid
   order by username
@@ -106,7 +107,7 @@ begin
 
   delete from public.usernames where user_id = uid;
 
-  insert into public.usernames (username, user_id, avatar_seed) values (u, uid, v_seed);
+  insert into public.usernames (username, user_id, avatar_seed, avatar_url) values (u, uid, v_seed, v_url);
 
   update auth.users set
     email = new_email,
