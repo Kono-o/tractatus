@@ -3050,6 +3050,34 @@ span.boot-panel-placeholder::after,
   transform: translateY(1px);
 }
 
+.pub-header-logo-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0.5px solid var(--rule2);
+  border-radius: 6px;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--hint);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.pub-header-logo-back:hover {
+  color: var(--muted);
+  border-color: var(--border);
+  background: var(--surf);
+}
+
+.pub-header-logo-back-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 .pub-header-logo--hidden {
   max-width: 0;
   opacity: 0;
@@ -3406,6 +3434,15 @@ span.boot-panel-placeholder::after,
   flex-shrink: 0;
 }
 
+.pub-loading-spinner {
+  animation: pub-spin 0.8s linear infinite;
+  color: var(--hint);
+  width: 22px;
+  height: 22px;
+  display: block;
+  margin: 0 auto;
+}
+
 .pub-tag {
   font-family: var(--ui);
   font-size: 10px;
@@ -3544,6 +3581,7 @@ span.boot-panel-placeholder::after,
 .user-chip {
   display: inline-flex;
   align-items: center;
+  gap: 0.4rem;
   background: none;
   border: none;
   padding: 0;
