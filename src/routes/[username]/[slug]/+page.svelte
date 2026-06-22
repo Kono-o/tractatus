@@ -56,7 +56,19 @@
 </script>
 
 <svelte:head>
-  <title>{essay?.title || 'Reading'}</title>
+  <title>{essay?.title || 'Reading'} · Tractatus</title>
+  {#if essay}
+    <meta name="description" content="{essay.title} — by {essay.author_username}" />
+    <meta property="og:title" content="{essay.title} · Tractatus" />
+    <meta property="og:description" content="{essay.title} — by @{essay.author_username}" />
+    <meta property="og:image" content="{$page.url.origin}/api/og/{essay.author_username}/{essay.slug}" />
+    <meta property="og:url" content="{$page.url.origin}/@{essay.author_username}/{essay.slug}" />
+    <meta property="og:type" content="article" />
+    <meta name="twitter:title" content="{essay.title} · Tractatus" />
+    <meta name="twitter:description" content="{essay.title} — by @{essay.author_username}" />
+    <meta name="twitter:image" content="{$page.url.origin}/api/og/{essay.author_username}/{essay.slug}" />
+    <link rel="canonical" href="{$page.url.origin}/@{essay.author_username}/{essay.slug}" />
+  {/if}
 </svelte:head>
 
 {#if loading}

@@ -2156,6 +2156,9 @@
 </script>
 
 <svelte:head>
+  <title>Tractatus</title>
+  <meta property="og:title" content="Tractatus" />
+  <meta property="og:description" content="A minimalist writing platform — write, publish, and share your thoughts." />
   <link rel="preconnect" href="https://covers.openlibrary.org" />
 </svelte:head>
 

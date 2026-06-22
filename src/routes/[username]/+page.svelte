@@ -65,7 +65,19 @@
 </script>
 
 <svelte:head>
-  <title>{profile?.username || 'User'}</title>
+  <title>{profile?.username || 'User'} · Tractatus</title>
+  {#if profile}
+    <meta name="description" content="{profile.username}'s profile on Tractatus — {essayCount ?? 0} {essayCount === 1 ? 'essay' : 'essays'} written." />
+    <meta property="og:title" content="{profile.username} · Tractatus" />
+    <meta property="og:description" content="{profile.username}'s profile on Tractatus — {essayCount ?? 0} {essayCount === 1 ? 'essay' : 'essays'} written." />
+    <meta property="og:image" content="{$page.url.origin}/api/og/{profile.username}" />
+    <meta property="og:url" content="{$page.url.origin}/@{profile.username}" />
+    <meta property="og:type" content="profile" />
+    <meta name="twitter:title" content="{profile.username} · Tractatus" />
+    <meta name="twitter:description" content="{profile.username}'s profile on Tractatus — {essayCount ?? 0} {essayCount === 1 ? 'essay' : 'essays'} written." />
+    <meta name="twitter:image" content="{$page.url.origin}/api/og/{profile.username}" />
+    <link rel="canonical" href="{$page.url.origin}/@{profile.username}" />
+  {/if}
 </svelte:head>
 
 {#if loading}

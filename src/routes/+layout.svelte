@@ -81,6 +81,18 @@
 
 <svelte:head>
   <title>Tractatus</title>
+  <meta name="description" content="A minimalist writing platform — write, publish, and share your thoughts." />
+  <meta property="og:site_name" content="Tractatus" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Tractatus" />
+  <meta property="og:description" content="A minimalist writing platform — write, publish, and share your thoughts." />
+  <meta property="og:image" content="{$page.url.origin}/api/og" />
+  <meta property="og:url" content="{$page.url.origin}{$page.url.pathname}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Tractatus" />
+  <meta name="twitter:description" content="A minimalist writing platform — write, publish, and share your thoughts." />
+  <meta name="twitter:image" content="{$page.url.origin}/api/og" />
+  <link rel="canonical" href="{$page.url.origin}{$page.url.pathname}" />
   <link rel="preload" href={oxaniumLatin} as="font" type="font/woff2" crossorigin="anonymous" />
   <link rel="preload" href={spaceMonoLatin} as="font" type="font/woff2" crossorigin="anonymous" />
 </svelte:head>
