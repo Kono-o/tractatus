@@ -65,6 +65,9 @@
     onaddbook?: () => void;
   } = $props();
 
+  // ── Carousel collapse ──
+  let carouselCollapsed = $state(false);
+
   // ── Search state ──
   let searchResults = $state<BookResult[]>([]);
   let searchLoading = $state(false);
@@ -632,11 +635,14 @@
     <div class="rl-section">
       <div class="rl-header">
         <div class="rl-header-left">
-          <h3 class="rl-title">My Reading List</h3>
-            <span class="rl-sep">·</span>
-            <span class="rl-count">{sharedList.items.length} {sharedList.items.length === 1 ? 'Book' : 'Books'}</span>
+          <button type="button" class="rl-title-btn" onclick={() => carouselCollapsed = !carouselCollapsed}>
+            <h3 class="rl-title">My Reading List</h3>
+            <svg class="rl-chevron" class:rl-chevron--open={!carouselCollapsed} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <span class="rl-count">{sharedList.items.length} {sharedList.items.length === 1 ? 'Book' : 'Books'}</span>
         </div>
       </div>
+      <div class="rl-track-collapse" class:rl-track-collapse--open={!carouselCollapsed}>
       <div class="rl-track-wrap" class:rl-track-wrap--scrolled={trackScrolled} onwheel={onTrackWheel}>
         <div bind:this={readingListTrack} class="rl-track" ontouchstart={onTrackTouchStart} ontouchmove={onTrackTouchMove} onscroll={onTrackScroll}>
           {#each sharedList.items as item (item.id)}
@@ -667,6 +673,7 @@
             {/if}
           {/each}
         </div>
+      </div>
       </div>
     </div>
   {/if}
@@ -857,9 +864,15 @@
   .rl-section { }
   .rl-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; padding-left: 0.25rem; }
   .rl-header-left { display: flex; align-items: baseline; gap: 0.5rem; }
-  .rl-title { font-family: 'Inter', sans-serif; font-size: 0.7rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--hint); margin: 0; }
+  .rl-title-btn { all: unset; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .rl-title-btn:hover .rl-title { color: var(--ink); }
+  .rl-chevron { color: var(--hint); opacity: 0.5; transition: transform 0.15s ease; }
+  .rl-chevron--open { transform: rotate(90deg); }
+  .rl-title { font-family: 'Inter', sans-serif; font-size: 0.7rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--hint); margin: 0; transition: color 0.1s; }
+  .rl-track-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.2s ease; }
+  .rl-track-collapse--open { grid-template-rows: 1fr; }
+  .rl-track-collapse > .rl-track-wrap { min-height: 0; overflow: hidden; }
   .rl-count { font-family: 'Inter', sans-serif; font-size: 0.65rem; color: var(--hint); opacity: 0.5; }
-  .rl-sep { font-size: 0.65rem; color: var(--hint); opacity: 0.35; }
   .rl-track-wrap { position: relative; overflow: hidden; -webkit-mask: linear-gradient(90deg, #000 calc(100% - 48px), transparent); mask: linear-gradient(90deg, #000 calc(100% - 48px), transparent); }
   .rl-track-wrap--scrolled { -webkit-mask: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 48px), transparent 100%); mask: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 48px), transparent 100%); }
   .rl-track { display: flex; gap: 8px; overflow-x: auto; scroll-behavior: smooth; padding: 4px 0 8px; scrollbar-width: none; }
