@@ -457,6 +457,16 @@ export interface ReadingLog {
 	updated_at: string;
 }
 
+export interface ReadingListItem {
+	id: string;
+	user_id: string;
+	book_id: string;
+	title: string;
+	author: string | null;
+	cover_i: number | null;
+	added_at: string;
+}
+
 export function slugifyTitle(title: string): string {
 	const base = (title || 'untitled')
 		.toLowerCase()
@@ -1039,6 +1049,54 @@ export const db = {
 			throw new Error('Too many requests. Try again later.');
 		}
 		const { error } = await supabase.from('reading_logs').delete().eq('id', id);
+		if (error) throw error;
+	},
+
+	/* ==================================================
+	   READING LIST
+	   ================================================== */
+
+	async listReadingList(): Promise<ReadingListItem[]> {
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!user) return [];
+		const { data, error } = await supabase
+			.from('reading_list')
+			.select('*')
+			.eq('user_id', user.id)
+			.order('added_at', { ascending: true });
+		if (error) throw error;
+		return (data ?? []) as ReadingListItem[];
+	},
+
+	async addToReadingList(params: {
+		book_id: string;
+		title: string;
+		author: string | null;
+		cover_i: number | null;
+	}): Promise<void> {
+		const { data: { user } } = await supabase.auth.getUser();
+		const uid = user?.id;
+		if (!uid) throw new Error('Not authenticated');
+		if (!checkClientRateLimit('add-reading-list', uid, 20, 60_000)) {
+			throw new Error('Too many requests. Try again later.');
+		}
+		const { error } = await supabase.from('reading_list').upsert({
+			user_id: uid,
+			book_id: params.book_id,
+			title: (params.title || 'Untitled').trim().slice(0, 500),
+			author: params.author?.trim().slice(0, 200) ?? null,
+			cover_i: params.cover_i,
+		}, { onConflict: 'user_id,book_id' });
+		if (error) throw error;
+	},
+
+	async removeFromReadingList(bookId: string): Promise<void> {
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!user) throw new Error('Not authenticated');
+		if (!checkClientRateLimit('remove-reading-list', user.id, 20, 60_000)) {
+			throw new Error('Too many requests. Try again later.');
+		}
+		const { error } = await supabase.from('reading_list').delete().eq('book_id', bookId).eq('user_id', user.id);
 		if (error) throw error;
 	},
 };

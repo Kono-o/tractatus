@@ -487,11 +487,6 @@
   }
 
   let diarySearchQuery = $state('');
-  let bookSelected = $state(false);
-
-  function clearBookSelection() {
-    bookSelected = false;
-  }
 
   function viewUser(username: string, avatarUrl?: string | null, avatarSeed?: string | null) {
     if (readingEssay) closeArticle();
@@ -2473,14 +2468,6 @@
     </div>
   {:else}
     {#if !readingEssay && !readingEssayLoading}
-      {#if bookSelected}
-        <div class="pub-header-sub">
-          <button type="button" class="pub-header-back-btn" onclick={clearBookSelection}>
-            <ArrowLeft class="size-3.5" aria-hidden="true" />
-            Back
-          </button>
-        </div>
-      {:else}
     <nav class="pub-view-nav" aria-label="Feed, books, essays, and library">
       <button
         type="button"
@@ -2517,13 +2504,12 @@
         </button>
       {/if}
     </nav>
-      {/if}
     {/if}
 
   {#if viewMode === 'diary'}
     <div class="pub-scroll no-scrollbar">
       {#if currentUser}
-        <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} bind:bookSelected onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} />
+        <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} onaddbook={toggleSearch} />
       {:else}
         <div class="pub-empty">
           <div class="pub-empty-title">Books</div>

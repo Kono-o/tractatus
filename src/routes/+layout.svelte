@@ -5,6 +5,7 @@
   import { page } from '$app/stores';
   import { auth } from '$lib/current-user.svelte';
   import { panels } from '$lib/panel-state.svelte';
+  import { loadReadingList } from '$lib/reading-list.svelte';
   import { supabase, db } from '$lib/db';
   import PubHeader from '$lib/components/PubHeader.svelte';
   import PubHeaderAccountBtn from '$lib/components/PubHeaderAccountBtn.svelte';
@@ -68,6 +69,7 @@
   $effect(() => {
     if (auth.currentUser && !auth.isAuthLoading) {
       void loadAvatarData();
+      void loadReadingList();
     } else if (!auth.currentUser) {
       auth.avatarSeed = null;
       auth.avatarUrl = null;
