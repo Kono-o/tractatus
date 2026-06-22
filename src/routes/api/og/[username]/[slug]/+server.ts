@@ -16,5 +16,11 @@ export const GET = async ({ params }) => {
     .trim()
     .slice(0, 200);
 
-  return await essayOG(essay.title, essay.author_username ?? username, snippet);
+  return await essayOG(
+    essay.title,
+    essay.author_username ?? username,
+    snippet,
+    essay.published_at,
+    essay.content,
+  );
 };

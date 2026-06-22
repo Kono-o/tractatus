@@ -5,7 +5,7 @@ export const GET = async ({ params }) => {
   const username = params.username.replace(/^@/, '');
   const user = await supabase
     .from('profiles')
-    .select('user_id')
+    .select('user_id, created_at')
     .eq('username', username)
     .single();
   if (!user.data) {
@@ -16,5 +16,5 @@ export const GET = async ({ params }) => {
     .select('id', { count: 'exact', head: true })
     .eq('user_id', user.data.user_id)
     .eq('is_public', true);
-  return await profileOG(username, count ?? 0);
+  return await profileOG(username, count ?? 0, user.data.created_at);
 };

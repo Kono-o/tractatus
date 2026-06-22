@@ -15,12 +15,14 @@ async function fetchFont(cssUrl: string): Promise<ArrayBuffer> {
 }
 
 async function loadFonts() {
-  const [inter400, inter700] = await Promise.all([
+  const [inter400, inter600, inter700] = await Promise.all([
     fetchFont('https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap'),
+    fetchFont('https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap'),
     fetchFont('https://fonts.googleapis.com/css2?family=Inter:wght@700&display=swap'),
   ]);
   return [
     { name: 'Inter', data: inter400, weight: 400 as const, style: 'normal' as const },
+    { name: 'Inter', data: inter600, weight: 600 as const, style: 'normal' as const },
     { name: 'Inter', data: inter700, weight: 700 as const, style: 'normal' as const },
   ];
 }
@@ -42,31 +44,31 @@ function h(type: string, props: Record<string, unknown> | null, ...children: (VN
   };
 }
 
-const BG = '#f8f4eb';
-const FG = '#1f1a14';
-const ACCENT = '#2f3a2f';
+const BG = '#14120f';
+const FG = '#e8e0d4';
+const ACCENT = '#6d7a6a';
 const MUTED = '#8a8174';
-const SEP = '#e6dfd3';
+const SEP = '#2e2a22';
 
 function brand() {
-  return h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' } },
-    h('div', { style: { width: '28px', height: '28px', borderRadius: '6px', background: ACCENT, display: 'flex', alignItems: 'center', justifyContent: 'center' } },
-      h('svg', { width: '18', height: '18', viewBox: '0 0 24 24', fill: 'none', stroke: '#ffffff', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' },
+  return h('div', { style: { display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '32px' } },
+    h('div', { style: { width: '36px', height: '36px', borderRadius: '8px', background: ACCENT, display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+      h('svg', { width: '22', height: '22', viewBox: '0 0 24 24', fill: 'none', stroke: '#14120f', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' },
         h('path', { d: 'M2 8a10.645 10.645 0 0 0 20 0' }),
         h('path', { d: 'm20 15-1.726-2.05' }),
         h('path', { d: 'm4 15 1.726-2.05' }),
       ),
     ),
-    h('span', { style: { fontFamily: 'Inter', fontSize: '22px', fontWeight: 700, color: ACCENT, letterSpacing: '0.04em', textTransform: 'uppercase' } }, 'Tractatus'),
+    h('span', { style: { fontFamily: 'Inter', fontSize: '28px', fontWeight: 700, color: FG, letterSpacing: '0.04em' } }, 'Tractatus'),
   );
 }
 
 function rule() {
-  return h('div', { style: { width: '48px', height: '2px', borderRadius: '1px', background: SEP, margin: '20px 0' } });
+  return h('div', { style: { width: '56px', height: '2px', borderRadius: '1px', background: SEP, margin: '24px 0' } });
 }
 
 function domain() {
-  return h('div', { style: { fontFamily: 'Inter', fontSize: '12px', fontWeight: 400, color: MUTED, letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: '24px' } }, 'tractatus.app');
+  return h('div', { style: { fontFamily: 'Inter', fontSize: '13px', fontWeight: 400, color: MUTED, letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: '28px' } }, 'tractatus.app');
 }
 
 function base(...children: (VNode | string)[]) {
@@ -101,21 +103,46 @@ export async function mainOG(): Promise<Response> {
   return render(
     base(
       brand(),
-      h('div', { style: { fontFamily: 'Inter', fontSize: '40px', fontWeight: 700, color: FG, textAlign: 'center', lineHeight: 1.2, maxWidth: '560px' } }, 'A minimalist writing platform'),
-      h('div', { style: { fontFamily: 'Inter', fontSize: '18px', fontWeight: 400, color: MUTED, textAlign: 'center', marginTop: '10px' } }, 'Write, publish, and share your thoughts.'),
+      h('div', { style: { fontFamily: 'Inter', fontSize: '48px', fontWeight: 700, color: FG, textAlign: 'center', lineHeight: 1.2, maxWidth: '640px' } }, 'A minimalist writing platform'),
+      h('div', { style: { fontFamily: 'Inter', fontSize: '20px', fontWeight: 400, color: MUTED, textAlign: 'center', marginTop: '12px' } }, 'Write, publish, and share your thoughts.'),
       rule(),
       domain(),
     ),
   );
 }
 
-export async function profileOG(username: string, essayCount: number): Promise<Response> {
+function formatDate(d: string): string {
+  try {
+    return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+  } catch { return ''; }
+}
+
+function readingTime(content: string): string {
+  const words = content.trim().split(/\s+/).length;
+  const min = Math.max(1, Math.ceil(words / 200));
+  return `${min} min read`;
+}
+
+export async function profileOG(username: string, essayCount: number, createdAt: string | null): Promise<Response> {
   return render(
     base(
       brand(),
-      h('div', { style: { fontFamily: 'Inter', fontSize: '36px', fontWeight: 700, color: FG, textAlign: 'center', lineHeight: 1.3 } }, `@${username}`),
-      h('div', { style: { fontFamily: 'Inter', fontSize: '16px', fontWeight: 400, color: MUTED, textAlign: 'center', marginTop: '6px' } },
-        `${essayCount} ${essayCount === 1 ? 'essay' : 'essays'} written`,
+      h('div', {
+        style: {
+          fontFamily: 'Inter',
+          fontSize: '52px',
+          fontWeight: 700,
+          color: FG,
+          textAlign: 'center',
+          lineHeight: 1.2,
+          maxWidth: '700px',
+        }
+      }, `@${username}`),
+      h('div', { style: { display: 'flex', gap: '16px', alignItems: 'center', marginTop: '10px' } },
+        h('div', { style: { fontFamily: 'Inter', fontSize: '16px', fontWeight: 400, color: MUTED } },
+          `${essayCount} ${essayCount === 1 ? 'essay' : 'essays'}`,
+        ),
+        createdAt ? h('div', { style: { fontFamily: 'Inter', fontSize: '13px', fontWeight: 400, color: MUTED, opacity: '0.5' } }, `Joined ${formatDate(createdAt)}`) : null,
       ),
       rule(),
       domain(),
@@ -123,17 +150,29 @@ export async function profileOG(username: string, essayCount: number): Promise<R
   );
 }
 
-export async function essayOG(title: string, authorUsername: string, contentSnippet: string): Promise<Response> {
-  const truncated = contentSnippet.length > 100
-    ? contentSnippet.slice(0, 100).trimEnd() + '…'
+export async function essayOG(
+  title: string,
+  authorUsername: string,
+  contentSnippet: string,
+  publishedAt: string | null,
+  fullContent: string,
+): Promise<Response> {
+  const truncated = contentSnippet.length > 120
+    ? contentSnippet.slice(0, 120).trimEnd() + '…'
     : contentSnippet;
+
+  const min = readingTime(fullContent);
 
   return render(
     base(
       brand(),
-      h('div', { style: { fontFamily: 'Inter', fontSize: '32px', fontWeight: 700, color: FG, textAlign: 'center', lineHeight: 1.3, maxWidth: '640px' } }, title),
-      h('div', { style: { fontFamily: 'Inter', fontSize: '14px', fontWeight: 400, color: MUTED, textAlign: 'center', marginTop: '6px', maxWidth: '480px', lineHeight: 1.5 } }, truncated),
-      h('div', { style: { fontFamily: 'Inter', fontSize: '13px', fontWeight: 400, color: ACCENT, textAlign: 'center', marginTop: '16px' } }, `by @${authorUsername}`),
+      h('div', { style: { fontFamily: 'Inter', fontSize: '40px', fontWeight: 700, color: FG, textAlign: 'center', lineHeight: 1.25, maxWidth: '720px' } }, title),
+      truncated ? h('div', { style: { fontFamily: 'Inter', fontSize: '16px', fontWeight: 400, color: MUTED, textAlign: 'center', marginTop: '10px', maxWidth: '520px', lineHeight: 1.5 } }, truncated) : null,
+      h('div', { style: { display: 'flex', gap: '14px', alignItems: 'center', marginTop: '18px' } },
+        h('span', { style: { fontFamily: 'Inter', fontSize: '14px', fontWeight: 600, color: ACCENT } }, `@${authorUsername}`),
+        h('span', { style: { fontFamily: 'Inter', fontSize: '12px', fontWeight: 400, color: MUTED, opacity: '0.5' } }, min),
+        publishedAt ? h('span', { style: { fontFamily: 'Inter', fontSize: '12px', fontWeight: 400, color: MUTED, opacity: '0.5' } }, formatDate(publishedAt)) : null,
+      ),
       rule(),
       domain(),
     ),
