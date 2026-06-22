@@ -869,8 +869,8 @@
   .rl-chevron { color: var(--hint); opacity: 0.5; transition: transform 0.15s ease; }
   .rl-chevron--open { transform: rotate(90deg); }
   .rl-title { font-family: 'Inter', sans-serif; font-size: 0.7rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--hint); margin: 0; transition: color 0.1s; }
-  .rl-track-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.2s ease; }
-  .rl-track-collapse--open { grid-template-rows: 1fr; }
+  .rl-track-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 0.2s ease, opacity 0.15s ease; }
+  .rl-track-collapse--open { grid-template-rows: 1fr; opacity: 1; }
   .rl-track-collapse > .rl-track-wrap { min-height: 0; overflow: hidden; }
   .rl-count { font-family: 'Inter', sans-serif; font-size: 0.65rem; color: var(--hint); opacity: 0.5; }
   .rl-track-wrap { position: relative; overflow: hidden; -webkit-mask: linear-gradient(90deg, #000 calc(100% - 48px), transparent); mask: linear-gradient(90deg, #000 calc(100% - 48px), transparent); }
