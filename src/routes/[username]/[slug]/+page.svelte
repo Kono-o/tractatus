@@ -3,13 +3,16 @@
   import { page } from '$app/stores';
   import { db, type Essay } from '$lib/db';
   import EssayView from '$lib/components/EssayView.svelte';
+  import type { PageData } from './$types';
+
+  let { data }: { data: PageData } = $props();
 
   let username = $derived(($page.params.username).replace(/^@/, ''));
   let slug = $derived($page.params.slug);
 
-  let essay = $state<Essay | null>(null);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  let essay = $state<Essay | null>(data.essay);
+  let loading = $state(data.essay === null);
+  let error = $state<string | null>(data.essay === null ? 'This essay is not public or does not exist.' : null);
   let linkCopied = $state(false);
   let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -31,9 +34,9 @@
   }
 
   async function load() {
+    if (essay) return;
     loading = true;
     error = null;
-    essay = null;
     try {
       if (!slug || !username) throw new Error('Missing slug or username');
       const found = await db.getPublicEssayByUsernameAndSlug(username, slug);
@@ -51,7 +54,7 @@
   }
 
   $effect(() => {
-    if (slug && username) void load();
+    if (slug && username && !essay) void load();
   });
 </script>
 
@@ -71,9 +74,9 @@
   {/if}
 </svelte:head>
 
-{#if loading}
+{#if loading && !essay}
   <div class="pub-empty"><svg class="pub-loading-spinner" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" /></svg></div>
-{:else if error}
+{:else if error && !essay}
   <div class="pub-empty">
     <div class="pub-empty-title">{error}</div>
     <button type="button" onclick={goBack} class="pub-article-back-link">← Back to feed</button>

@@ -3,15 +3,19 @@
   import { page } from '$app/stores';
   import { db, supabase, type Essay } from '$lib/db';
   import ProfileView from '$lib/components/ProfileView.svelte';
+  import type { PageData } from './$types';
+
+  let { data }: { data: PageData } = $props();
 
   let username = $derived(($page.params.username).replace(/^@/, ''));
 
   let preview = $derived<{ username: string; avatarUrl: string | null | undefined; avatarSeed: string | null | undefined } | null>(($page.state as any)?.userPreview ?? null);
 
-  let profile = $state<{ user_id: string; username: string; avatar_seed: string | null; avatar_url: string | null; created_at: string | null } | null>(null);
-  let essays = $state<Essay[]>([]);
-  let loading = $state(true);
+  let profile = $state<{ user_id: string; username: string; avatar_seed: string | null; avatar_url: string | null; created_at: string | null } | null>(data.profile);
+  let essays = $state<Essay[]>(data.essays);
+  let loading = $state(data.profile === null);
   let error = $state<string | null>(null);
+  let essayCount = $state<number | null>(data.essayCount);
 
   $effect(() => {
     if (preview) {
@@ -20,13 +24,10 @@
     }
   });
 
-  let essayCount = $state<number | null>(null);
-
   async function load() {
+    if (profile) return;
     loading = true;
     error = null;
-    profile = null;
-    essays = [];
     try {
       if (!username) throw new Error('Missing username');
       const u = await db.getUserByUsername(username);
@@ -52,7 +53,7 @@
   }
 
   $effect(() => {
-    if (username) void load();
+    if (username && !profile && !preview) void load();
   });
 
   function handleEssayClick(essay: Essay) {
@@ -80,9 +81,9 @@
   {/if}
 </svelte:head>
 
-{#if loading}
+{#if loading && !profile}
   <div class="pub-empty"><svg class="pub-loading-spinner" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round" /></svg></div>
-{:else if error}
+{:else if error && !profile}
   <div class="pub-empty">
     <div class="pub-empty-title">{error}</div>
     <button type="button" onclick={goBack} class="pub-article-back-link">← Back</button>
