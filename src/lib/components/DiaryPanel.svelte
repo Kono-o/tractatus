@@ -633,10 +633,8 @@
       <div class="rl-header">
         <div class="rl-header-left">
           <h3 class="rl-title">My Reading List</h3>
-          {#if sharedList.items.length > 0}
             <span class="rl-sep">·</span>
             <span class="rl-count">{sharedList.items.length} {sharedList.items.length === 1 ? 'Book' : 'Books'}</span>
-          {/if}
         </div>
       </div>
       <div class="rl-track-wrap" class:rl-track-wrap--scrolled={trackScrolled} onwheel={onTrackWheel}>
