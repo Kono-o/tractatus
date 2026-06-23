@@ -53,6 +53,13 @@
   import { X, Star, Check, BookMarked } from '@lucide/svelte';
   import { readingList as sharedList, addToReadingList as sharedAdd, removeFromReadingList as sharedRemove } from '$lib/reading-list.svelte';
 
+  function capitalizeTitle(s: string): string {
+    const articles = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'by', 'with', 'in', 'of', 'up', 'as', 'is', 'it']);
+    return s.replace(/\w+/g, (w, i) =>
+      i === 0 || !articles.has(w.toLowerCase()) ? w[0].toUpperCase() + w.slice(1) : w.toLowerCase()
+    );
+  }
+
   let {
     searchQuery = '',
     onselect,
@@ -741,23 +748,20 @@
         {:else}
           <div class="book-fade-layer">
             {#if bookDetailsLoading}
-              <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
-                <div class="book-skel-header" />
+                <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
                 <div class="book-body">
                   <div class="book-skel-cover" />
                   <div class="book-skel-info">
+                    <div class="book-skel-line" style="width:75%" />
+                    <div class="book-skel-line" style="width:45%" />
                     <div class="book-skel-line" style="width:55%" />
-                    <div class="book-skel-line" style="width:35%" />
                   </div>
                 </div>
               </div>
             {/if}
             {#if !bookDetailsLoading && bookDetails}
               <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
-                <div class="book-header">
-                  <h2 class="book-header-title">{selectedBook.title}</h2>
-                  <button type="button" class="book-close" onclick={clearSelection} aria-label="Close"><X class="size-5" /></button>
-                </div>
+                <button type="button" class="book-close book-close--top" onclick={clearSelection} aria-label="Close"><X class="size-5" /></button>
                 <div class="book-body">
                   {#if selectedBook.coverUrl}
                     <img src={selectedBook.coverUrl} alt="" class="book-cover" role="button" tabindex="0" onclick={() => showCoverLightbox = true} onkeydown={(e) => { if (e.key === 'Enter') showCoverLightbox = true; }} />
@@ -767,15 +771,16 @@
                     </div>
                   {/if}
                   <div class="book-info">
-                    {#if selectedBook.author}
-                      <div class="book-author">{selectedBook.author}</div>
-                    {/if}
+                    <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
+                    <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
                     <div class="book-meta">
-                      {#if selectedBook.year}<span>{selectedBook.year}</span>{/if}
-                      {#if selectedBook.year && selectedBook.publisher}<span class="book-dot"></span>{/if}
-                      {#if selectedBook.publisher}<span>{selectedBook.publisher}</span>{/if}
+                      <span>{selectedBook.year ?? 'Year unknown'}</span>
+                      {#if selectedBook.publisher}
+                        <span class="book-dot"></span>
+                        <span>{selectedBook.publisher}</span>
+                      {/if}
                       {#if selectedBook.first_publish_year}
-                        {#if selectedBook.publisher || selectedBook.year}<span class="book-dot"></span>{/if}
+                        <span class="book-dot"></span>
                         <span>First published {selectedBook.first_publish_year}</span>
                       {/if}
                     </div>
@@ -792,6 +797,8 @@
 
                 {#if bookDetails.description}
                   <div class="book-desc">{@html renderDescription(bookDetails.description)}</div>
+                {:else}
+                  <div class="book-desc book-desc--empty">No description</div>
                 {/if}
 
                 {#if bookDetails.subjects?.length}
@@ -946,10 +953,10 @@
   .overlay-content { position: relative; background: var(--bg); border-radius: 12px; max-width: 460px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 1.25rem 1.5rem 1.5rem; box-shadow: 0 8px 32px rgba(0,0,0,0.35); animation: pop 0.2s cubic-bezier(0.34,1.56,0.64,1); }
 
   /* Book header */
-  .book-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.75rem; }
-  .book-header-title { font-family: var(--dm); font-size: 0.95rem; font-weight: 400; line-height: 1.35; letter-spacing: 0.02em; color: var(--ink); margin: 0; flex: 1; }
+  .book-header-title { font-family: var(--dm); font-size: 0.95rem; font-weight: 400; line-height: 1.35; letter-spacing: 0.02em; color: var(--ink); margin: 0; }
   .book-close { flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: transparent; border: none; cursor: pointer; color: var(--hint); transition: background 0.12s, color 0.12s; }
   .book-close:hover { background: var(--surf); color: var(--text); }
+  .book-close--top { position: absolute; top: 0.75rem; right: 0.75rem; z-index: 1; }
 
   /* Book body — cover + info */
   .book-body { display: flex; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
@@ -972,6 +979,7 @@
 
   /* Book description */
   .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); margin-top: 0.75rem; max-height: 280px; overflow-y: auto; scrollbar-width: thin; }
+  .book-desc--empty { color: var(--hint); opacity: 0.6; font-style: italic; }
 
   /* Book sections (subjects, places, etc.) */
   .book-section { margin-top: 0.75rem; }
