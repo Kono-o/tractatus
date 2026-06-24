@@ -142,6 +142,7 @@
   let readingListTrack: HTMLElement | undefined = $state();
   let placeholderCount = $state(0);
   let placeholderCountForItems = $derived(Math.max(1, placeholderCount - sharedList.items.length));
+  let displayYear = $derived(selectedBook?.year ?? bookDetails?.first_publish_year ?? null);
   let touchStartX = 0;
   let touchStartScroll = 0;
   let trackScrolled = $state(false);
@@ -441,8 +442,8 @@
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data = await res.json();
       bookDetails = data as BookDetails;
-      if (data.first_publish_year && !selectedBook.year) {
-        selectedBook = { ...selectedBook, year: data.first_publish_year };
+      if (data.first_publish_year && !selectedBook?.year) {
+        selectedBook = { ...selectedBook!, year: data.first_publish_year };
       }
     } catch (e) {
       console.warn('[diary] failed to load book details', e);
@@ -765,11 +766,11 @@
                   <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
                   <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
                   <div class="book-meta">
-                    {#if selectedBook.year || bookDetails?.first_publish_year}
-                      <span>{selectedBook.year ?? bookDetails?.first_publish_year}</span>
+                    {#if displayYear}
+                      <span>{displayYear}</span>
                     {/if}
                     {#if selectedBook.publisher}
-                      {#if selectedBook.year || bookDetails?.first_publish_year}<span class="book-dot"></span>{/if}
+                      {#if displayYear}<span class="book-dot"></span>{/if}
                       <span>{selectedBook.publisher}</span>
                     {/if}
                   </div>
