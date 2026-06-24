@@ -774,13 +774,15 @@
                     <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
                     <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
                     <div class="book-meta">
-                      <span>{selectedBook.year ?? 'Year unknown'}</span>
+                      {#if selectedBook.year}
+                        <span>{selectedBook.year}</span>
+                      {/if}
                       {#if selectedBook.publisher}
-                        <span class="book-dot"></span>
+                        {#if selectedBook.year}<span class="book-dot"></span>{/if}
                         <span>{selectedBook.publisher}</span>
                       {/if}
                       {#if selectedBook.first_publish_year}
-                        <span class="book-dot"></span>
+                        {#if selectedBook.year || selectedBook.publisher}<span class="book-dot"></span>{/if}
                         <span>First published {selectedBook.first_publish_year}</span>
                       {/if}
                     </div>
@@ -953,7 +955,7 @@
   .overlay-content { position: relative; background: var(--bg); border-radius: 12px; max-width: 460px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 1.25rem 1.5rem 1.5rem; box-shadow: 0 8px 32px rgba(0,0,0,0.35); animation: pop 0.2s cubic-bezier(0.34,1.56,0.64,1); }
 
   /* Book header */
-  .book-header-title { font-family: var(--dm); font-size: 0.95rem; font-weight: 400; line-height: 1.35; letter-spacing: 0.02em; color: var(--ink); margin: 0; }
+  .book-header-title { font-family: var(--dm); font-size: 1.05rem; font-weight: 700; line-height: 1.35; letter-spacing: 0.02em; color: var(--ink); margin: 0; }
   .book-close { flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: transparent; border: none; cursor: pointer; color: var(--hint); transition: background 0.12s, color 0.12s; }
   .book-close:hover { background: var(--surf); color: var(--text); }
   .book-close--top { position: absolute; top: 0.75rem; right: 0.75rem; z-index: 1; }
