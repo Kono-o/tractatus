@@ -998,7 +998,7 @@
   .book-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
   /* Book description */
-  .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); padding-top: 0.75rem; }
+  .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); padding-top: 0.75rem; word-wrap: break-word; }
   .book-desc--empty { color: var(--hint); opacity: 0.6; font-style: italic; }
 
   /* Book sections (subjects, places, etc.) */
@@ -1013,9 +1013,9 @@
 
   /* Book crossfade layer */
   .book-fade-layer { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-  .book-fade-cell { min-height: 0; }
+  .book-fade-layer > .book-fade-cell { display: flex; flex-direction: column; min-height: 0; }
   .book-scroll-fade-layer { display: grid; flex: 1; min-height: 0; }
-  .book-scroll-fade-layer > .book-fade-cell { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; }
+  .book-scroll-fade-layer > .book-fade-cell { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
   /* Book skeletons */
   .book-skel-cover { width: 88px; height: 132px; border-radius: 6px; flex-shrink: 0; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
