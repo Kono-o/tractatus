@@ -135,6 +135,7 @@
   let bookDetails: BookDetails | null = $state(null);
   let selectedBook: BookResult | null = $state<BookResult | null>(null);
   let bookSelected = $state(false);
+  let descCollapsed = $state(false);
   let showCoverLightbox = $state(false);
   let showLogForm = $state(false);
   let editingLog: ReadingLog | null = $state(null);
@@ -805,12 +806,17 @@
                   <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
                     <div class="book-scroll">
                     <div class="book-section">
-                      <h3 class="book-section-title">Description</h3>
+                      <button type="button" class="book-section-title-btn" onclick={() => descCollapsed = !descCollapsed}>
+                        <h3 class="book-section-title">Description</h3>
+                        <svg class="book-section-chevron" class:book-section-chevron--open={!descCollapsed} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                      </button>
+                      <div class="book-section-collapse" class:book-section-collapse--open={!descCollapsed}>
                     {#if bookDetails.description}
                       <div class="book-desc">{@html renderDescription(bookDetails.description)}</div>
                     {:else}
                       <div class="book-desc book-desc--empty">No description</div>
                     {/if}
+                      </div>
                     </div>
                     {#if bookDetails.subjects?.length}
                       <div class="book-section">
@@ -977,8 +983,8 @@
   .book-cover:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
   .book-cover--empty { display: flex; align-items: center; justify-content: center; background: var(--surf); color: var(--hint); box-shadow: none; }
   .book-info { flex: 1; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
-  .book-author { font-family: var(--font-mono); font-size: 0.78rem; color: var(--hint); line-height: 1.4; }
-  .book-meta { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-family: var(--font-mono); font-size: 0.65rem; color: var(--hint); opacity: 0.65; }
+  .book-author { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); line-height: 1.4; }
+  .book-meta { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
   .book-dot { display: inline-block; width: 2px; height: 2px; border-radius: 50%; background: currentColor; opacity: 0.5; }
   .book-actions { display: flex; gap: 6px; margin-top: 6px; }
   .book-btn { padding: 5px 12px; border-radius: 6px; border: 0.5px solid var(--border); background: transparent; cursor: pointer; font-family: var(--font-mono); font-size: 0.7rem; color: var(--hint); transition: background 0.12s, border-color 0.12s, color 0.12s; }
@@ -1002,7 +1008,14 @@
 
   /* Book sections (subjects, places, etc.) */
   .book-section { margin-top: 0.75rem; }
-  .book-section-title { font-size: 0.6rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hint); opacity: 0.7; margin: 0 0 0.4rem; }
+  .book-section-title { font-size: 0.6rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hint); opacity: 0.7; margin: 0; }
+  .book-section-title-btn { all: unset; cursor: pointer; display: flex; align-items: center; gap: 6px; margin: 0 0 0.4rem; }
+  .book-section-title-btn:hover .book-section-title { opacity: 1; }
+  .book-section-chevron { color: var(--hint); opacity: 0.5; transition: transform 0.15s ease; }
+  .book-section-chevron--open { transform: rotate(90deg); }
+  .book-section-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 0.2s ease, opacity 0.15s ease; }
+  .book-section-collapse--open { grid-template-rows: 1fr; opacity: 1; }
+  .book-section-collapse > .book-desc { min-height: 0; overflow: hidden; }
   .book-tags { display: flex; flex-wrap: wrap; gap: 4px; }
   .book-tag { padding: 2px 8px; border-radius: 5px; background: var(--surf); border: 0.5px solid var(--border); font-family: var(--font-mono); font-size: 0.65rem; color: var(--hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
 
