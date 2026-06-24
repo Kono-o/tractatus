@@ -752,18 +752,31 @@
           <div class="book-fade-layer">
             {#if bookDetailsLoading}
                 <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
+                <button type="button" class="book-close book-close--top" aria-label="Close" disabled><X class="size-5" /></button>
                 <div class="book-body">
                   <div class="book-skel-cover" />
                   <div class="book-skel-info">
-                    <div class="book-skel-line" style="width:75%" />
-                    <div class="book-skel-line" style="width:45%" />
-                    <div class="book-skel-line" style="width:55%" />
+                    <div class="book-skel-line" style="width:82%" />
+                    <div class="book-skel-line" style="width:48%" />
+                    <div class="book-skel-line" style="width:38%" />
+                    <div class="book-skel-actions">
+                      <div class="book-skel-btn" style="width:70px" />
+                      <div class="book-skel-btn" style="width:50px" />
+                    </div>
                   </div>
                 </div>
                 <div class="book-scroll">
-                  <div class="book-skel-line" style="width:90%; margin-top: 0" />
-                  <div class="book-skel-line" style="width:70%" />
-                  <div class="book-skel-line" style="width:80%" />
+                  <div class="book-skel-line" />
+                  <div class="book-skel-line" style="width:92%" />
+                  <div class="book-skel-line" style="width:78%" />
+                  <div class="book-skel-line" style="width:85%" />
+                  <div class="book-skel-section-title" />
+                  <div class="book-skel-tags">
+                    <div class="book-skel-tag" />
+                    <div class="book-skel-tag" style="width:45px" />
+                    <div class="book-skel-tag" style="width:55px" />
+                    <div class="book-skel-tag" style="width:40px" />
+                  </div>
                 </div>
               </div>
             {/if}
@@ -805,13 +818,12 @@
                   </div>
                 </div>
 
+                <div class="book-scroll">
                 {#if bookDetails.description}
                   <div class="book-desc">{@html renderDescription(bookDetails.description)}</div>
                 {:else}
                   <div class="book-desc book-desc--empty">No description</div>
                 {/if}
-
-                <div class="book-scroll">
                 {#if bookDetails.subjects?.length}
                   <div class="book-section">
                     <h3 class="book-section-title">Subjects</h3>
@@ -1014,10 +1026,14 @@
   .book-fade-cell { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; }
 
   /* Book skeletons */
-  .book-skel-header { height: 20px; width: 60%; border-radius: 6px; margin-bottom: 1rem; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
   .book-skel-cover { width: 88px; height: 132px; border-radius: 6px; flex-shrink: 0; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
   .book-skel-info { flex: 1; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
-  .book-skel-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
+  .book-skel-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; margin-bottom: 0; }
+  .book-skel-actions { display: flex; gap: 6px; margin-top: 2px; }
+  .book-skel-btn { height: 24px; border-radius: 6px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
+  .book-skel-section-title { height: 10px; width: 60px; border-radius: 4px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; margin: 12px 0 8px; }
+  .book-skel-tags { display: flex; gap: 5px; }
+  .book-skel-tag { height: 20px; width: 50px; border-radius: 5px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
 
   /* ───── Log Form ───── */
   .log-form { display: flex; flex-direction: column; gap: 0.75rem; }
