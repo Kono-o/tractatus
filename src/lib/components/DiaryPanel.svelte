@@ -750,131 +750,121 @@
 
         {:else}
           <div class="book-fade-layer">
-            {#if bookDetailsLoading}
-                <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
-                <button type="button" class="book-close book-close--top" aria-label="Close" disabled><X class="size-5" /></button>
-                <div class="book-body">
-                  <div class="book-skel-cover" />
-                  <div class="book-skel-info">
-                    <div class="book-skel-line" style="width:82%" />
-                    <div class="book-skel-line" style="width:48%" />
-                    <div class="book-skel-line" style="width:38%" />
-                    <div class="book-skel-actions">
-                      <div class="book-skel-btn" style="width:70px" />
-                      <div class="book-skel-btn" style="width:50px" />
-                    </div>
-                  </div>
-                </div>
-                <div class="book-scroll">
-                  <div class="book-skel-line" />
-                  <div class="book-skel-line" style="width:92%" />
-                  <div class="book-skel-line" style="width:78%" />
-                  <div class="book-skel-line" style="width:85%" />
-                  <div class="book-skel-section-title" />
-                  <div class="book-skel-tags">
-                    <div class="book-skel-tag" />
-                    <div class="book-skel-tag" style="width:45px" />
-                    <div class="book-skel-tag" style="width:55px" />
-                    <div class="book-skel-tag" style="width:40px" />
-                  </div>
-                </div>
-              </div>
-            {/if}
-            {#if !bookDetailsLoading && bookDetails}
-              <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
-                <button type="button" class="book-close book-close--top" onclick={clearSelection} aria-label="Close"><X class="size-5" /></button>
-                <div class="book-body">
-                  {#if selectedBook.coverUrl}
-                    <img src={selectedBook.coverUrl} alt="" class="book-cover" role="button" tabindex="0" onclick={() => showCoverLightbox = true} onkeydown={(e) => { if (e.key === 'Enter') showCoverLightbox = true; }} />
-                  {:else}
-                    <div class="book-cover book-cover--empty">
-                      <BookMarked class="size-10" aria-hidden="true" />
-                    </div>
-                  {/if}
-                  <div class="book-info">
-                    <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
-                    <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
-                    <div class="book-meta">
-                      {#if selectedBook.year}
-                        <span>{selectedBook.year}</span>
-                      {/if}
-                      {#if selectedBook.publisher}
-                        {#if selectedBook.year}<span class="book-dot"></span>{/if}
-                        <span>{selectedBook.publisher}</span>
-                      {/if}
-                      {#if selectedBook.first_publish_year}
-                        {#if selectedBook.year || selectedBook.publisher}<span class="book-dot"></span>{/if}
-                        <span>First published {selectedBook.first_publish_year}</span>
-                      {/if}
-                    </div>
-                    <div class="book-actions">
-                      {#if allReadingListItemIds.has(selectedBook.id)}
-                        <button type="button" class="book-btn book-btn--remove" onclick={() => removeFromReadingList(selectedBook.id)}>Remove</button>
-                      {:else}
-                        <button type="button" class="book-btn book-btn--add" onclick={() => addToReadingList(selectedBook)}>Add to List</button>
-                      {/if}
-                      <button type="button" class="book-btn book-btn--log" onclick={() => showLogForm = true}>Log</button>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="book-scroll">
-                {#if bookDetails.description}
-                  <div class="book-desc">{@html renderDescription(bookDetails.description)}</div>
+            <div class="book-fade-cell">
+              <button type="button" class="book-close book-close--top" onclick={clearSelection} aria-label="Close"><X class="size-5" /></button>
+              <div class="book-body">
+                {#if selectedBook.coverUrl}
+                  <img src={selectedBook.coverUrl} alt="" class="book-cover" role="button" tabindex="0" onclick={() => showCoverLightbox = true} onkeydown={(e) => { if (e.key === 'Enter') showCoverLightbox = true; }} />
                 {:else}
-                  <div class="book-desc book-desc--empty">No description</div>
-                {/if}
-                {#if bookDetails.subjects?.length}
-                  <div class="book-section">
-                    <h3 class="book-section-title">Subjects</h3>
-                    <div class="book-tags">
-                      {#each bookDetails.subjects.slice(0, 8) as s}
-                        <span class="book-tag">{s}</span>
-                      {/each}
-                    </div>
+                  <div class="book-cover book-cover--empty">
+                    <BookMarked class="size-10" aria-hidden="true" />
                   </div>
                 {/if}
-
-                {#if bookDetails.subject_places?.length}
-                  <div class="book-section">
-                    <h3 class="book-section-title">Places</h3>
-                    <div class="book-tags">
-                      {#each bookDetails.subject_places.slice(0, 4) as p}
-                        <span class="book-tag">{p}</span>
-                      {/each}
-                    </div>
+                <div class="book-info">
+                  <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
+                  <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
+                  <div class="book-meta">
+                    {#if selectedBook.year}
+                      <span>{selectedBook.year}</span>
+                    {/if}
+                    {#if selectedBook.publisher}
+                      {#if selectedBook.year}<span class="book-dot"></span>{/if}
+                      <span>{selectedBook.publisher}</span>
+                    {/if}
+                    {#if selectedBook.first_publish_year}
+                      {#if selectedBook.year || selectedBook.publisher}<span class="book-dot"></span>{/if}
+                      <span>First published {selectedBook.first_publish_year}</span>
+                    {/if}
                   </div>
-                {/if}
-
-                {#if bookDetails.subject_people?.length}
-                  <div class="book-section">
-                    <h3 class="book-section-title">People</h3>
-                    <div class="book-tags">
-                      {#each bookDetails.subject_people.slice(0, 4) as p}
-                        <span class="book-tag">{p}</span>
-                      {/each}
-                    </div>
+                  <div class="book-actions">
+                    {#if allReadingListItemIds.has(selectedBook.id)}
+                      <button type="button" class="book-btn book-btn--remove" onclick={() => removeFromReadingList(selectedBook.id)}>Remove</button>
+                    {:else}
+                      <button type="button" class="book-btn book-btn--add" onclick={() => addToReadingList(selectedBook)}>Add to List</button>
+                    {/if}
+                    <button type="button" class="book-btn book-btn--log" onclick={() => showLogForm = true}>Log</button>
                   </div>
-                {/if}
-
-                {#if bookDetails.subject_times?.length}
-                  <div class="book-section">
-                    <h3 class="book-section-title">Time Periods</h3>
-                    <div class="book-tags">
-                      {#each bookDetails.subject_times.slice(0, 4) as t}
-                        <span class="book-tag">{t}</span>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
                 </div>
               </div>
-            {/if}
-            {#if !bookDetailsLoading && !bookDetails}
-              <div class="book-error">
-                <p>Could not load book details.</p>
+
+              <div class="book-scroll-fade-layer">
+                {#if bookDetailsLoading}
+                  <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
+                    <div class="book-scroll">
+                      <div class="book-skel-line" />
+                      <div class="book-skel-line" style="width:92%" />
+                      <div class="book-skel-line" style="width:78%" />
+                      <div class="book-skel-line" style="width:85%" />
+                      <div class="book-skel-section-title" />
+                      <div class="book-skel-tags">
+                        <div class="book-skel-tag" />
+                        <div class="book-skel-tag" style="width:45px" />
+                        <div class="book-skel-tag" style="width:55px" />
+                        <div class="book-skel-tag" style="width:40px" />
+                      </div>
+                    </div>
+                  </div>
+                {/if}
+                {#if !bookDetailsLoading && bookDetails}
+                  <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
+                    <div class="book-scroll">
+                    {#if bookDetails.description}
+                      <div class="book-desc">{@html renderDescription(bookDetails.description)}</div>
+                    {:else}
+                      <div class="book-desc book-desc--empty">No description</div>
+                    {/if}
+                    {#if bookDetails.subjects?.length}
+                      <div class="book-section">
+                        <h3 class="book-section-title">Subjects</h3>
+                        <div class="book-tags">
+                          {#each bookDetails.subjects.slice(0, 8) as s}
+                            <span class="book-tag">{s}</span>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                    {#if bookDetails.subject_places?.length}
+                      <div class="book-section">
+                        <h3 class="book-section-title">Places</h3>
+                        <div class="book-tags">
+                          {#each bookDetails.subject_places.slice(0, 4) as p}
+                            <span class="book-tag">{p}</span>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                    {#if bookDetails.subject_people?.length}
+                      <div class="book-section">
+                        <h3 class="book-section-title">People</h3>
+                        <div class="book-tags">
+                          {#each bookDetails.subject_people.slice(0, 4) as p}
+                            <span class="book-tag">{p}</span>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                    {#if bookDetails.subject_times?.length}
+                      <div class="book-section">
+                        <h3 class="book-section-title">Time Periods</h3>
+                        <div class="book-tags">
+                          {#each bookDetails.subject_times.slice(0, 4) as t}
+                            <span class="book-tag">{t}</span>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                    </div>
+                  </div>
+                {/if}
+                {#if !bookDetailsLoading && !bookDetails}
+                  <div class="book-fade-cell">
+                    <div class="book-error">
+                      <p>Could not load book details.</p>
+                    </div>
+                  </div>
+                {/if}
               </div>
-            {/if}
+            </div>
           </div>
         {/if}
       </div>
@@ -1002,13 +992,13 @@
   .book-btn--log:hover { opacity: 0.9; }
 
   /* Book scrollable area (description + sections) */
-  .book-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; margin-top: 0.75rem; }
+  .book-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .book-scroll::-webkit-scrollbar { width: 4px; }
   .book-scroll::-webkit-scrollbar-track { background: transparent; }
   .book-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
   /* Book description */
-  .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); }
+  .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); padding-top: 0.75rem; }
   .book-desc--empty { color: var(--hint); opacity: 0.6; font-style: italic; }
 
   /* Book sections (subjects, places, etc.) */
@@ -1022,8 +1012,10 @@
   .book-error p { margin: 0; }
 
   /* Book crossfade layer */
-  .book-fade-layer { display: grid; flex: 1; min-height: 0; }
-  .book-fade-cell { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; }
+  .book-fade-layer { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .book-fade-cell { min-height: 0; }
+  .book-scroll-fade-layer { display: grid; flex: 1; min-height: 0; }
+  .book-scroll-fade-layer > .book-fade-cell { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; }
 
   /* Book skeletons */
   .book-skel-cover { width: 88px; height: 132px; border-radius: 6px; flex-shrink: 0; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
