@@ -48,9 +48,11 @@
 </script>
 
 <script lang="ts">
+  import { marked } from 'marked';
   import { fade } from 'svelte/transition';
   import { db, type ReadingLog } from '$lib/db';
-  import { X, Star, Check, BookMarked } from '@lucide/svelte';
+  import { X, Star, Check, BookMarked, Plus, PenLine, Heart } from '@lucide/svelte';
+  import CalendarPopover from './CalendarPopover.svelte';
   import { readingList as sharedList, addToReadingList as sharedAdd, removeFromReadingList as sharedRemove } from '$lib/reading-list.svelte';
 
   function capitalizeTitle(s: string): string {
@@ -187,11 +189,42 @@
   // ── Log form state ──
   let reviewText = $state('');
   let rating = $state<number>(0);
-  let liked: boolean | null = $state(null);
-  let readDate = $state(new Date().toISOString().split('T')[0]);
-  let saving = $state(false);
+  let liked: boolean | 'half' | null = $state(null);
+  let startDate = $state(new Date().toISOString().split('T')[0]);
+  let endDate = $state('');
   let saveError = $state<string | null>(null);
   let deleteConfirmId = $state<string | null>(null);
+  let logSaving = $state(false);
+  let logLastSavedAt: number | null = null;
+  let logSnapshot: string | null = null;
+  let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let logIsDirty = $derived(logSnapshot !== null && serializeForm() !== logSnapshot);
+  let logSaveStatus = $derived(logSaving ? 'saving' : !logLastSavedAt ? 'unsaved' : logIsDirty ? 'unsaved' : 'saved');
+
+  function serializeForm() {
+    return JSON.stringify({ reviewText, rating, liked, startDate, endDate });
+  }
+
+  function takeLogSnapshot() {
+    logSnapshot = serializeForm();
+  }
+
+  function scheduleAutoSave() {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      if (!logIsDirty) return;
+      void doSaveLog();
+    }, 850);
+  }
+
+  $effect(() => {
+    const _ = serializeForm();
+    if (logSnapshot !== null) {
+      scheduleAutoSave();
+    }
+    return () => { if (autoSaveTimer) clearTimeout(autoSaveTimer); };
+  });
 
   // ── Helper functions ──
   function escHtml(s: string): string {
@@ -410,8 +443,7 @@
       const d = desc as Record<string, unknown>;
       text = typeof d.value === 'string' ? d.value : JSON.stringify(d);
     }
-    const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    return text.replace(/[&<>"']/g, ch => entities[ch] || ch);
+    return marked.parse(text, { async: false }) as string;
   }
 
   function selectBook(book: BookResult) {
@@ -434,6 +466,7 @@
     showCoverLightbox = false;
     showLogForm = false;
     editingLog = null;
+    if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
   }
 
   async function loadBookDetails(olid: string) {
@@ -495,10 +528,15 @@
       publisher: null,
     };
     reviewText = log.review || '';
-    rating = log.rating || 0;
-    liked = log.liked;
-    readDate = log.read_date;
+    const r = log.rating || 0;
+    liked = r % 1 !== 0 ? 'half' : (log.liked === true ? true : null);
+    rating = Math.floor(r);
+    startDate = log.start_date || log.read_date || '';
+    endDate = log.end_date || '';
     saveError = null;
+    logSnapshot = null;
+    logLastSavedAt = Date.now();
+    takeLogSnapshot();
   }
 
   function startLogging() {
@@ -506,8 +544,12 @@
     reviewText = '';
     rating = 0;
     liked = null;
-    readDate = new Date().toISOString().split('T')[0];
+    startDate = new Date().toISOString().split('T')[0];
+    endDate = '';
     saveError = null;
+    logLastSavedAt = null;
+    logSnapshot = null;
+    takeLogSnapshot();
     showLogForm = true;
   }
 
@@ -515,38 +557,42 @@
     if (rating === val) { rating = 0; } else { rating = val; }
   }
 
-  function cycleLiked() {
+  function toggleLiked() {
     if (liked === null) liked = true;
-    else if (liked === true) liked = false;
+    else if (liked === true) liked = 'half';
     else liked = null;
   }
 
-  async function saveLog() {
+  async function doSaveLog() {
     if (!selectedBook) return;
-    saving = true;
+    logSaving = true;
     saveError = null;
     try {
+      const effectiveRating = liked === 'half' ? (rating || 0) + 0.5 : rating;
       const saved = await db.saveReadingLog({
         id: editingLog?.id ?? null,
         book_id: selectedBook.id,
         title: selectedBook.title,
         author: selectedBook.author,
         cover_url: selectedBook.coverUrl,
-        rating: rating > 0 ? rating : null,
-        liked: liked,
+        rating: effectiveRating > 0 ? effectiveRating : null,
+        liked: liked === 'half' ? true : liked,
         review: reviewText.trim() || null,
-        read_date: readDate,
+        start_date: startDate,
+        end_date: endDate || null,
       });
       if (editingLog) {
         logs = logs.map((l) => (l.id === saved.id ? saved : l));
       } else {
+        editingLog = saved;
         logs = [saved, ...logs];
       }
-      clearSelection();
+      logLastSavedAt = Date.now();
+      takeLogSnapshot();
     } catch (e: any) {
       saveError = e.message || 'Failed to save';
     } finally {
-      saving = false;
+      logSaving = false;
     }
   }
 
@@ -648,9 +694,9 @@
               <button type="button" class="search-more-btn" onclick={loadMore}>Load more</button>
             {/if}
           </div>
-        </div>
-        </div>
-      {/if}
+            </div>
+          </div>
+        {/if}
       </div>
     </div>
   </div>
@@ -680,7 +726,6 @@
                   </div>
                 {/if}
               </button>
-              <button type="button" class="rl-card-remove" onclick={() => removeFromReadingList(item.id)} aria-label="Remove from list"><X class="size-3" aria-hidden="true" /></button>
             </div>
           {/each}
           {#each Array(placeholderCountForItems) as _, i}
@@ -707,109 +752,88 @@
       <div class="overlay-bg"></div>
       <div class="overlay-content" onclick={(e) => e.stopPropagation()}>
 
-        {#if showLogForm}
-          <div class="log-form">
-            <div class="log-form-top">
-              <h3 class="log-form-title">{editingLog ? 'Edit Log' : 'New Entry'}</h3>
-              <button type="button" class="log-form-close" onclick={clearSelection} aria-label="Close"><X class="size-5" /></button>
+        <button type="button" class="book-close book-close--top" onclick={clearSelection} aria-label="Close"><X class="size-5" /></button>
+        <div class="book-body">
+          {#if selectedBook.coverUrl}
+            <img src={selectedBook.coverUrl} alt="" class="book-cover" role="button" tabindex="0" onclick={() => showCoverLightbox = true} onkeydown={(e) => { if (e.key === 'Enter') showCoverLightbox = true; }} />
+          {:else}
+            <div class="book-cover book-cover--empty">
+              <BookMarked class="size-10" aria-hidden="true" />
             </div>
-            <div class="log-form-book">
-              {#if selectedBook.coverUrl}
-                <img src={selectedBook.coverUrl} alt="" class="log-form-cover" loading="lazy" onerror={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
-              {:else}
-                <div class="log-form-cover log-form-cover--empty">
-                  <BookMarked class="size-8" aria-hidden="true" />
-                </div>
-              {/if}
-              <div class="log-form-book-meta">
-                <div class="log-form-book-title">{selectedBook.title}</div>
-                {#if selectedBook.author}
-                  <div class="log-form-book-author">{selectedBook.author}</div>
+          {/if}
+          <div class="book-info">
+            <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
+            <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
+              <div class="book-meta">
+                <span class="book-year">{bookYear ? String(bookYear) : '—'}</span>
+                {#if selectedBook.publisher}
+                  <span class="book-dot"></span>
+                  <span>{selectedBook.publisher}</span>
                 {/if}
               </div>
+            <div class="book-actions">
+              {#if allReadingListItemIds.has(selectedBook.id)}
+                <button type="button" class="book-btn book-btn--remove" onclick={() => removeFromReadingList(selectedBook.id)}><X class="size-3.5" aria-hidden="true" />Remove from List</button>
+              {:else}
+                <button type="button" class="book-btn book-btn--add" onclick={() => addToReadingList(selectedBook)}><Plus class="size-3.5" aria-hidden="true" />Add to List</button>
+              {/if}
             </div>
-            <div class="log-form-field">
-              <label class="log-form-label">Rating</label>
+          </div>
+        </div>
+
+        {#if showLogForm}
+          <div class="log-form-body">
+            <div class="log-rating-row">
               <div class="log-stars">
-                {#each [0.5,1,1.5,2,2.5,3,3.5,4,4.5,5] as val}
-                  <button type="button" class="log-star" class:log-star--on={val <= rating} class:log-star--half={val === rating && val % 1 !== 0} onclick={() => setRating(val)} aria-label="{val} stars">
-                    <Star class="size-5" aria-hidden="true" />
+                {#each [1,2,3,4,5] as val}
+                  <button type="button" class="log-star" class:log-star--on={val <= rating} onclick={() => setRating(val)} aria-label="{val} stars">
+                    <Star class="size-6" fill={val <= rating ? '#f59e0b' : 'none'} aria-hidden="true" />
                   </button>
                 {/each}
               </div>
-            </div>
-            <div class="log-form-field">
-              <label class="log-form-label">Liked it?</label>
-              <button type="button" class="log-liked" class:log-liked--yes={liked === true} class:log-liked--no={liked === false} onclick={cycleLiked}>
-                {#if liked === true}<Check class="size-4" aria-hidden="true" /> Liked
-                {:else if liked === false}<X class="size-4" aria-hidden="true" /> Didn't like
-                {:else}Skip{/if}
+              <button type="button" class="log-heart" class:log-heart--on={liked !== null} onclick={toggleLiked} aria-label="Toggle liked">
+                {#if liked === 'half'}
+                  <svg class="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+                    <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" clip-path="inset(0 50% 0 0)" fill="#ef4444" stroke="#ef4444" />
+                  </svg>
+                {:else}
+                  <Heart class="size-6" fill={liked === true ? '#ef4444' : 'none'} aria-hidden="true" />
+                {/if}
               </button>
             </div>
-            <div class="log-form-field">
-              <label class="log-form-label" for="lr">Review</label>
-              <textarea id="lr" class="log-form-ta" bind:value={reviewText} placeholder="What did you think? (optional)" maxlength={5000} rows={4}></textarea>
-            </div>
-            <div class="log-form-field">
-              <label class="log-form-label" for="ld">Date read</label>
-              <input id="ld" type="date" class="log-form-date" bind:value={readDate} max={new Date().toISOString().split('T')[0]} />
+            <textarea id="lr" class="log-form-ta" bind:value={reviewText} placeholder="What did you think?" maxlength={5000}></textarea>
+            <div class="log-form-bottom">
+              <CalendarPopover label="Start" bind:value={startDate} />
+              <CalendarPopover label="End" bind:value={endDate} />
+              <span
+                class="log-form-chip"
+                class:log-form-chip--unsaved={logSaveStatus === 'unsaved'}
+                class:log-form-chip--saving={logSaveStatus === 'saving'}
+                class:log-form-chip--saved={logSaveStatus === 'saved'}
+              >
+                {#if logSaveStatus === 'saving'}
+                  Saving
+                {:else if logSaveStatus === 'saved'}
+                  Saved
+                {:else}
+                  Unsaved
+                {/if}
+              </span>
             </div>
             {#if saveError}
               <div class="log-form-err">{saveError}</div>
             {/if}
-            <button type="button" class="log-form-save" disabled={saving} onclick={saveLog}>
-              {saving ? 'Saving…' : editingLog ? 'Update Entry' : 'Log Entry'}
-            </button>
           </div>
 
         {:else}
           <div class="book-fade-layer">
             <div class="book-fade-cell">
-              <button type="button" class="book-close book-close--top" onclick={clearSelection} aria-label="Close"><X class="size-5" /></button>
-              <div class="book-body">
-                {#if selectedBook.coverUrl}
-                  <img src={selectedBook.coverUrl} alt="" class="book-cover" role="button" tabindex="0" onclick={() => showCoverLightbox = true} onkeydown={(e) => { if (e.key === 'Enter') showCoverLightbox = true; }} />
-                {:else}
-                  <div class="book-cover book-cover--empty">
-                    <BookMarked class="size-10" aria-hidden="true" />
-                  </div>
-                {/if}
-                <div class="book-info">
-                  <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
-                  <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
-                    <div class="book-meta">
-                      <span class="book-year">{bookYear ? String(bookYear) : '—'}</span>
-                      {#if selectedBook.publisher}
-                        <span class="book-dot"></span>
-                        <span>{selectedBook.publisher}</span>
-                      {/if}
-                    </div>
-                  <div class="book-actions">
-                    {#if allReadingListItemIds.has(selectedBook.id)}
-                      <button type="button" class="book-btn book-btn--remove" onclick={() => removeFromReadingList(selectedBook.id)}>Remove</button>
-                    {:else}
-                      <button type="button" class="book-btn book-btn--add" onclick={() => addToReadingList(selectedBook)}>Add to List</button>
-                    {/if}
-                    <button type="button" class="book-btn book-btn--log" onclick={() => showLogForm = true}>Log</button>
-                  </div>
-                </div>
-              </div>
-
               <div class="book-scroll-fade-layer">
                 {#if bookDetailsLoading}
                   <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
-                    <div class="book-scroll">
-                      <div class="book-skel-line" />
-                      <div class="book-skel-line" style="width:92%" />
-                      <div class="book-skel-line" style="width:78%" />
-                      <div class="book-skel-line" style="width:85%" />
-                      <div class="book-skel-section-title" />
-                      <div class="book-skel-tags">
-                        <div class="book-skel-tag" />
-                        <div class="book-skel-tag" style="width:45px" />
-                        <div class="book-skel-tag" style="width:55px" />
-                        <div class="book-skel-tag" style="width:40px" />
-                      </div>
+                    <div class="book-spinner-wrap">
+                      <span class="book-spinner"></span>
                     </div>
                   </div>
                 {/if}
@@ -882,6 +906,9 @@
               </div>
             </div>
           </div>
+          <button type="button" class="book-fab-log" onclick={() => showLogForm = true} aria-label="Log">
+            <PenLine class="size-[18px]" />
+          </button>
         {/if}
       </div>
     </div>
@@ -916,9 +943,7 @@
   .rl-track::-webkit-scrollbar { display: none; }
   .rl-card { flex-shrink: 0; width: 100px; background: transparent; border: none; cursor: pointer; text-align: left; padding: 0; }
   .rl-card-wrap { position: relative; flex-shrink: 0; }
-  .rl-card-wrap:hover .rl-card-remove { opacity: 1; }
-  .rl-card-remove { position: absolute; top: 4px; right: 4px; opacity: 0; transition: opacity 0.12s; background: rgba(0,0,0,0.6); border: none; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; z-index: 2; }
-  .rl-card-remove:hover { background: rgba(239,68,68,0.8); }
+
   .rl-card--placeholder { cursor: default; }
   .rl-card--add { cursor: pointer; display: flex; }
   .rl-card-plus { font-size: 3rem; font-weight: 200; color: color-mix(in srgb, var(--hint) 50%, transparent); line-height: 1; }
@@ -983,7 +1008,7 @@
   .overlay-content { position: relative; background: var(--bg); border-radius: 12px; max-width: 460px; width: 100%; height: 480px; padding: 1.25rem 1.5rem 1.5rem; box-shadow: 0 8px 32px rgba(0,0,0,0.35); animation: pop 0.2s cubic-bezier(0.34,1.56,0.64,1); display: flex; flex-direction: column; }
 
   /* Book header */
-  .book-header-title { font-family: var(--dm); font-size: 1.05rem; font-weight: 700; line-height: 1.35; letter-spacing: 0.02em; color: var(--ink); margin: 0; }
+  .book-header-title { font-family: var(--dm); font-size: 1.15rem; font-weight: 700; line-height: 1.35; letter-spacing: 0.02em; color: var(--ink); margin: 0; }
   .book-close { flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: transparent; border: none; cursor: pointer; color: var(--hint); transition: background 0.12s, color 0.12s; }
   .book-close:hover { background: var(--surf); color: var(--text); }
   .book-close--top { position: absolute; top: 0.75rem; right: 0.75rem; z-index: 1; }
@@ -994,18 +1019,21 @@
   .book-cover:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
   .book-cover--empty { display: flex; align-items: center; justify-content: center; background: var(--surf); color: var(--hint); box-shadow: none; }
   .book-info { flex: 1; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
-  .book-author { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); line-height: 1.4; }
+  .book-author { font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-muted); line-height: 1.4; }
   .book-meta { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
   .book-dot { display: inline-block; width: 2px; height: 2px; border-radius: 50%; background: currentColor; opacity: 0.5; }
-  .book-actions { display: flex; gap: 6px; margin-top: 6px; }
-  .book-btn { padding: 5px 12px; border-radius: 6px; border: 0.5px solid var(--border); background: transparent; cursor: pointer; font-family: var(--font-mono); font-size: 0.7rem; color: var(--hint); transition: background 0.12s, border-color 0.12s, color 0.12s; }
+  .book-actions { display: flex; margin-top: 4px; }
+  .book-btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 6px; border: 0.5px solid var(--border); background: transparent; cursor: pointer; font-family: var(--font-mono); font-size: 0.7rem; color: var(--hint); transition: background 0.12s, border-color 0.12s, color 0.12s; }
   .book-btn:hover { background: var(--surf); color: var(--text); }
-  .book-btn--add { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-  .book-btn--add:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: var(--accent); }
+  .book-btn--add { color: var(--ink); border-color: var(--border); }
+  .book-btn--add:hover { background: var(--surf); color: var(--text); border-color: var(--text-muted); }
   .book-btn--remove { color: #ef4444; border-color: color-mix(in srgb, #ef4444 40%, transparent); }
   .book-btn--remove:hover { background: color-mix(in srgb, #ef4444 10%, transparent); border-color: #ef4444; }
-  .book-btn--log { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-  .book-btn--log:hover { opacity: 0.9; }
+
+  /* Book Log FAB */
+  .book-fab-log { position: absolute; right: 1.25rem; bottom: 1.25rem; z-index: 5; width: 64px; height: 64px; border-radius: 16px; border: 0.5px solid var(--border); background: var(--ink); color: var(--bg); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,0.15); transition: transform 0.12s, box-shadow 0.12s, background-color 0.12s; }
+  .book-fab-log:hover { background: var(--ink-hover); box-shadow: 0 5px 20px rgba(0,0,0,0.25); transform: translateY(-1px); }
+  .book-fab-log:active { transform: scale(0.94); }
 
   /* Book scrollable area (description + sections) */
   .book-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -1015,6 +1043,12 @@
 
   /* Book description */
   .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); word-wrap: break-word; }
+  .book-desc p { margin: 0 0 0.5em; }
+  .book-desc p:last-child { margin-bottom: 0; }
+  .book-desc a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .book-desc a:hover { opacity: 0.8; }
+  .book-desc em { font-style: italic; }
+  .book-desc strong { font-weight: 700; }
   .book-desc--empty { color: var(--hint); opacity: 0.6; font-style: italic; }
 
   /* Book sections (subjects, places, etc.) */
@@ -1040,44 +1074,32 @@
   .book-scroll-fade-layer { display: grid; grid-template-rows: 1fr; flex: 1; min-height: 0; }
   .book-scroll-fade-layer > .book-fade-cell { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
-  /* Book skeletons */
-  .book-skel-cover { width: 88px; height: 132px; border-radius: 6px; flex-shrink: 0; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
-  .book-skel-info { flex: 1; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
-  .book-skel-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; margin-bottom: 0; }
-  .book-skel-actions { display: flex; gap: 6px; margin-top: 2px; }
-  .book-skel-btn { height: 24px; border-radius: 6px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
-  .book-skel-section-title { height: 10px; width: 60px; border-radius: 4px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; margin: 12px 0 8px; }
-  .book-skel-tags { display: flex; gap: 5px; }
-  .book-skel-tag { height: 20px; width: 50px; border-radius: 5px; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
+  /* Book loading spinner */
+  .book-spinner-wrap { display: flex; align-items: center; justify-content: center; min-height: 120px; }
+  .book-spinner { display: inline-block; width: 22px; height: 22px; border: 2.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
 
   /* ───── Log Form ───── */
-  .log-form { display: flex; flex-direction: column; gap: 0.75rem; }
-  .log-form-top { display: flex; justify-content: space-between; align-items: center; }
-  .log-form-title { font-family: var(--dm); font-size: 1rem; font-weight: 700; color: var(--ink); margin: 0; }
-  .log-form-close { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: transparent; border: none; cursor: pointer; color: var(--hint); transition: background 0.12s, color 0.12s; }
-  .log-form-close:hover { background: var(--surf); color: var(--text); }
-  .log-form-book { display: flex; align-items: center; gap: 12px; }
-  .log-form-cover { width: 48px; height: 72px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: var(--surf); }
-  .log-form-cover--empty { display: flex; align-items: center; justify-content: center; color: var(--hint); }
-  .log-form-book-meta { min-width: 0; flex: 1; }
-  .log-form-book-title { font-family: var(--dm); font-size: 0.85rem; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .log-form-book-author { font-size: 0.75rem; color: var(--hint); }
-  .log-form-field { display: flex; flex-direction: column; gap: 4px; }
-  .log-form-label { font-size: 11px; color: var(--hint); text-transform: uppercase; letter-spacing: 0.04em; }
+  .log-form-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 0; overflow-y: auto; min-height: 0; flex: 1; scrollbar-width: none; -ms-overflow-style: none; }
+  .log-form-body::-webkit-scrollbar { display: none; }
+  .log-rating-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
   .log-stars { display: flex; gap: 2px; }
-  .log-star { background: transparent; border: none; cursor: pointer; padding: 2px; color: var(--hint); transition: color 0.15s; }
-  .log-star:hover { color: #f59e0b; }
+  .log-star { background: transparent; border: none; cursor: pointer; padding: 3px; color: var(--hint); transition: color 0.15s, transform 0.12s; border-radius: 6px; }
+  .log-star:hover { color: #f59e0b; transform: scale(1.15); }
+  .log-star:active { transform: scale(0.9); }
   .log-star--on { color: #f59e0b; }
-  .log-liked { font-size: 11px; padding: 4px 10px; border-radius: 6px; border: 0.5px solid var(--rule); background: transparent; color: var(--hint); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; }
-  .log-liked--yes { background: #065f46; color: #6ee7b7; border-color: #065f46; }
-  .log-liked--no { background: #7f1d1d; color: #fca5a5; border-color: #7f1d1d; }
-  .log-form-ta { width: 100%; background: transparent; border: 0.5px solid var(--rule); border-radius: 8px; padding: 8px; font-size: 12px; color: var(--ink); resize: vertical; font-family: inherit; outline: none; box-sizing: border-box; }
-  .log-form-ta:focus { border-color: var(--accent); }
-  .log-form-date { background: transparent; border: 0.5px solid var(--rule); border-radius: 8px; padding: 6px 8px; font-size: 12px; color: var(--ink); outline: none; max-width: 160px; }
-  .log-form-date:focus { border-color: var(--accent); }
-  .log-form-err { color: #ef4444; font-size: 11px; padding: 0.25rem 0; }
-  .log-form-save { padding: 8px 16px; border-radius: 8px; border: none; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; align-self: flex-start; }
-  .log-form-save:disabled { opacity: 0.5; cursor: default; }
+  .log-heart { background: transparent; border: none; cursor: pointer; padding: 3px; color: var(--hint); display: flex; transition: color 0.15s, transform 0.12s; border-radius: 6px; }
+  .log-heart:hover { color: #ef4444; transform: scale(1.15); }
+  .log-heart:active { transform: scale(0.9); }
+  .log-heart--on { color: #ef4444; }
+  .log-form-ta { width: 100%; background: transparent; border: 0.5px solid var(--border); border-radius: 8px; padding: 10px 11px; font-size: 0.8rem; color: var(--ink); resize: none; font-family: inherit; outline: none; box-sizing: border-box; line-height: 1.5; transition: border-color 0.12s; flex: 1; min-height: 60px; }
+  .log-form-ta:focus { border-color: var(--text-muted); }
+  .log-form-ta::placeholder { color: var(--hint); opacity: 0.5; }
+  .log-form-bottom { display: flex; align-items: flex-end; gap: 6px; }
+  .log-form-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 3.75rem; height: 28px; padding: 0 0.5rem; border-radius: 0.25rem; font-family: var(--ui); font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: 0.04em; text-transform: uppercase; border: 0.5px solid; transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease; }
+  .log-form-chip--unsaved { background: #fef3c7; color: #92400e; border-color: #fbbf24; }
+  .log-form-chip--saving { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+  .log-form-chip--saved { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+  .log-form-err { color: #ef4444; font-size: 11px; }
 
   /* Lightbox */
   .lightbox { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; padding: 2rem; animation: fadeIn 0.2s ease-out; }

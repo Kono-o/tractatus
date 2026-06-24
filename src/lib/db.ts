@@ -453,6 +453,8 @@ export interface ReadingLog {
 	liked: boolean | null;
 	review: string | null;
 	read_date: string;
+	start_date: string;
+	end_date: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -998,7 +1000,8 @@ export const db = {
 		rating: number | null;
 		liked: boolean | null;
 		review: string | null;
-		read_date: string;
+		start_date: string;
+		end_date: string | null;
 	}): Promise<ReadingLog> {
 		const { data: { user } } = await supabase.auth.getUser();
 		const uid = user?.id;
@@ -1017,7 +1020,9 @@ export const db = {
 			rating: params.rating,
 			liked: params.liked,
 			review: params.review?.trim().slice(0, 5000) ?? null,
-			read_date: params.read_date,
+			read_date: params.start_date,
+			start_date: params.start_date,
+			end_date: params.end_date,
 			updated_at: now,
 		};
 
