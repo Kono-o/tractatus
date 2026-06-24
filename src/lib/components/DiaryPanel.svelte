@@ -440,7 +440,7 @@
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data = await res.json();
       bookDetails = data as BookDetails;
-      if (data.first_publish_year) {
+      if (data.first_publish_year && !selectedBook.year) {
         selectedBook = { ...selectedBook, year: data.first_publish_year };
       }
     } catch (e) {
@@ -764,16 +764,12 @@
                   <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
                   <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
                   <div class="book-meta">
-                    {#if selectedBook.year}
-                      <span>{selectedBook.year}</span>
+                    {#if selectedBook.year || bookDetails?.first_publish_year}
+                      <span>{selectedBook.year ?? bookDetails?.first_publish_year}</span>
                     {/if}
                     {#if selectedBook.publisher}
-                      {#if selectedBook.year}<span class="book-dot"></span>{/if}
+                      {#if selectedBook.year || bookDetails?.first_publish_year}<span class="book-dot"></span>{/if}
                       <span>{selectedBook.publisher}</span>
-                    {/if}
-                    {#if selectedBook.first_publish_year}
-                      {#if selectedBook.year || selectedBook.publisher}<span class="book-dot"></span>{/if}
-                      <span>First published {selectedBook.first_publish_year}</span>
                     {/if}
                   </div>
                   <div class="book-actions">
@@ -808,11 +804,14 @@
                 {#if !bookDetailsLoading && bookDetails}
                   <div class="book-fade-cell" transition:fade={{ duration: 150 }}>
                     <div class="book-scroll">
+                    <div class="book-section">
+                      <h3 class="book-section-title">Description</h3>
                     {#if bookDetails.description}
                       <div class="book-desc">{@html renderDescription(bookDetails.description)}</div>
                     {:else}
                       <div class="book-desc book-desc--empty">No description</div>
                     {/if}
+                    </div>
                     {#if bookDetails.subjects?.length}
                       <div class="book-section">
                         <h3 class="book-section-title">Subjects</h3>
@@ -998,7 +997,7 @@
   .book-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
   /* Book description */
-  .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); padding-top: 0.75rem; word-wrap: break-word; }
+  .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); word-wrap: break-word; }
   .book-desc--empty { color: var(--hint); opacity: 0.6; font-style: italic; }
 
   /* Book sections (subjects, places, etc.) */
