@@ -760,6 +760,11 @@
                     <div class="book-skel-line" style="width:55%" />
                   </div>
                 </div>
+                <div class="book-scroll">
+                  <div class="book-skel-line" style="width:90%; margin-top: 0" />
+                  <div class="book-skel-line" style="width:70%" />
+                  <div class="book-skel-line" style="width:80%" />
+                </div>
               </div>
             {/if}
             {#if !bookDetailsLoading && bookDetails}
@@ -806,6 +811,7 @@
                   <div class="book-desc book-desc--empty">No description</div>
                 {/if}
 
+                <div class="book-scroll">
                 {#if bookDetails.subjects?.length}
                   <div class="book-section">
                     <h3 class="book-section-title">Subjects</h3>
@@ -849,6 +855,7 @@
                     </div>
                   </div>
                 {/if}
+                </div>
               </div>
             {/if}
             {#if !bookDetailsLoading && !bookDetails}
@@ -955,7 +962,7 @@
   /* ───── Overlay ───── */
   .overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 1rem; }
   .overlay-bg { position: absolute; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); }
-  .overlay-content { position: relative; background: var(--bg); border-radius: 12px; max-width: 460px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 1.25rem 1.5rem 1.5rem; box-shadow: 0 8px 32px rgba(0,0,0,0.35); animation: pop 0.2s cubic-bezier(0.34,1.56,0.64,1); }
+  .overlay-content { position: relative; background: var(--bg); border-radius: 12px; max-width: 460px; width: 100%; height: 480px; padding: 1.25rem 1.5rem 1.5rem; box-shadow: 0 8px 32px rgba(0,0,0,0.35); animation: pop 0.2s cubic-bezier(0.34,1.56,0.64,1); display: flex; flex-direction: column; }
 
   /* Book header */
   .book-header-title { font-family: var(--dm); font-size: 1.05rem; font-weight: 700; line-height: 1.35; letter-spacing: 0.02em; color: var(--ink); margin: 0; }
@@ -964,7 +971,7 @@
   .book-close--top { position: absolute; top: 0.75rem; right: 0.75rem; z-index: 1; }
 
   /* Book body — cover + info */
-  .book-body { display: flex; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
+  .book-body { display: flex; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .book-cover { width: 88px; height: 132px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: box-shadow 0.15s; }
   .book-cover:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
   .book-cover--empty { display: flex; align-items: center; justify-content: center; background: var(--surf); color: var(--hint); box-shadow: none; }
@@ -982,8 +989,14 @@
   .book-btn--log { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .book-btn--log:hover { opacity: 0.9; }
 
+  /* Book scrollable area (description + sections) */
+  .book-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; margin-top: 0.75rem; }
+  .book-scroll::-webkit-scrollbar { width: 4px; }
+  .book-scroll::-webkit-scrollbar-track { background: transparent; }
+  .book-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
   /* Book description */
-  .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); margin-top: 0.75rem; max-height: 280px; overflow-y: auto; scrollbar-width: thin; }
+  .book-desc { font-size: 0.78rem; line-height: 1.6; color: var(--text); }
   .book-desc--empty { color: var(--hint); opacity: 0.6; font-style: italic; }
 
   /* Book sections (subjects, places, etc.) */
@@ -997,8 +1010,8 @@
   .book-error p { margin: 0; }
 
   /* Book crossfade layer */
-  .book-fade-layer { display: grid; }
-  .book-fade-cell { grid-area: 1 / 1; }
+  .book-fade-layer { display: grid; flex: 1; min-height: 0; }
+  .book-fade-cell { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; }
 
   /* Book skeletons */
   .book-skel-header { height: 20px; width: 60%; border-radius: 6px; margin-bottom: 1rem; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; }
