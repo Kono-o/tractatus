@@ -134,6 +134,7 @@
   let bookDetailsLoading = $state(false);
   let bookDetails: BookDetails | null = $state(null);
   let selectedBook: BookResult | null = $state<BookResult | null>(null);
+  let bookYear: number | null = $state<number | null>(null);
   let bookSelected = $state(false);
   let descCollapsed = $state(false);
   let showCoverLightbox = $state(false);
@@ -415,6 +416,7 @@
 
   function selectBook(book: BookResult) {
     selectedBook = book;
+    bookYear = book.year;
     bookSelected = true;
     showLogForm = false;
     editingLog = null;
@@ -425,6 +427,7 @@
 
   function clearSelection() {
     selectedBook = null;
+    bookYear = null;
     bookSelected = false;
     bookDetails = null;
     bookDetailsLoading = false;
@@ -441,8 +444,8 @@
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data = await res.json();
       bookDetails = data as BookDetails;
-      if (data.first_publish_year && !selectedBook?.year) {
-        selectedBook = { ...selectedBook!, year: data.first_publish_year };
+      if (data.first_publish_year && !bookYear) {
+        bookYear = data.first_publish_year;
       }
     } catch (e) {
       console.warn('[diary] failed to load book details', e);
@@ -764,8 +767,8 @@
                 <div class="book-info">
                   <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
                   <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
-                    <div class="book-meta" data-year={selectedBook?.year}>
-                      <span class="book-year">{selectedBook?.year ? String(selectedBook.year) : '—'}</span>
+                    <div class="book-meta">
+                      <span class="book-year">{bookYear ? String(bookYear) : '—'}</span>
                       {#if selectedBook.publisher}
                         <span class="book-dot"></span>
                         <span>{selectedBook.publisher}</span>
