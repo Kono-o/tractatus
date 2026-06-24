@@ -142,7 +142,6 @@
   let readingListTrack: HTMLElement | undefined = $state();
   let placeholderCount = $state(0);
   let placeholderCountForItems = $derived(Math.max(1, placeholderCount - sharedList.items.length));
-  let displayYear = $derived(selectedBook?.year ?? bookDetails?.first_publish_year ?? null);
   let touchStartX = 0;
   let touchStartScroll = 0;
   let trackScrolled = $state(false);
@@ -765,15 +764,13 @@
                 <div class="book-info">
                   <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
                   <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
-                  <div class="book-meta">
-                    {#if displayYear}
-                      <span>{displayYear}</span>
-                    {/if}
-                    {#if selectedBook.publisher}
-                      {#if displayYear}<span class="book-dot"></span>{/if}
-                      <span>{selectedBook.publisher}</span>
-                    {/if}
-                  </div>
+                    <div class="book-meta">
+                      <span class="book-year">{selectedBook?.year ?? '—'}</span>
+                      {#if selectedBook.publisher}
+                        <span class="book-dot"></span>
+                        <span>{selectedBook.publisher}</span>
+                      {/if}
+                    </div>
                   <div class="book-actions">
                     {#if allReadingListItemIds.has(selectedBook.id)}
                       <button type="button" class="book-btn book-btn--remove" onclick={() => removeFromReadingList(selectedBook.id)}>Remove</button>
