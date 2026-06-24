@@ -992,7 +992,7 @@
   .book-btn--log:hover { opacity: 0.9; }
 
   /* Book scrollable area (description + sections) */
-  .book-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .book-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .book-scroll::-webkit-scrollbar { width: 4px; }
   .book-scroll::-webkit-scrollbar-track { background: transparent; }
   .book-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -1014,7 +1014,7 @@
   /* Book crossfade layer */
   .book-fade-layer { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .book-fade-layer > .book-fade-cell { display: flex; flex-direction: column; min-height: 0; }
-  .book-scroll-fade-layer { display: grid; flex: 1; min-height: 0; }
+  .book-scroll-fade-layer { display: grid; grid-template-rows: 1fr; flex: 1; min-height: 0; }
   .book-scroll-fade-layer > .book-fade-cell { grid-area: 1 / 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
   /* Book skeletons */
