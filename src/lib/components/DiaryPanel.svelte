@@ -440,6 +440,9 @@
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data = await res.json();
       bookDetails = data as BookDetails;
+      if (data.first_publish_year) {
+        selectedBook = { ...selectedBook, year: data.first_publish_year };
+      }
     } catch (e) {
       console.warn('[diary] failed to load book details', e);
       bookDetails = null;
