@@ -764,8 +764,8 @@
                 <div class="book-info">
                   <h2 class="book-header-title">{capitalizeTitle(selectedBook.title)}</h2>
                   <div class="book-author">{selectedBook.author || 'Anonymous'}</div>
-                    <div class="book-meta">
-                      <span class="book-year">{selectedBook?.year ?? '—'}</span>
+                    <div class="book-meta" data-year={selectedBook?.year}>
+                      <span class="book-year">{selectedBook?.year ? String(selectedBook.year) : '—'}</span>
                       {#if selectedBook.publisher}
                         <span class="book-dot"></span>
                         <span>{selectedBook.publisher}</span>
