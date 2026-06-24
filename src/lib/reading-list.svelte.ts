@@ -5,6 +5,7 @@ export interface ReadingListBook {
   title: string;
   author: string | null;
   coverUrl: string | null;
+  year: number | null;
 }
 
 export const readingList = $state<{
@@ -24,12 +25,13 @@ export async function loadReadingList() {
     title: i.title,
     author: i.author,
     coverUrl: i.cover_i ? `https://covers.openlibrary.org/b/id/${i.cover_i}-M.jpg` : null,
+    year: i.first_publish_year ?? null,
   }));
   readingList.bookIds = new Set(items.map(i => i.book_id));
   readingList.loaded = true;
 }
 
-export async function addToReadingList(book: { id: string; title: string; author: string | null; coverUrl: string | null }) {
+export async function addToReadingList(book: { id: string; title: string; author: string | null; coverUrl: string | null; year?: number | null }) {
   readingList.items = [...readingList.items, { ...book }];
   readingList.bookIds = new Set([...readingList.bookIds, book.id]);
   try {
@@ -39,6 +41,7 @@ export async function addToReadingList(book: { id: string; title: string; author
       title: book.title,
       author: book.author,
       cover_i,
+      first_publish_year: book.year ?? null,
     });
   } catch (e) {
     readingList.items = readingList.items.filter(b => b.id !== book.id);

@@ -464,6 +464,7 @@ export interface ReadingListItem {
 	title: string;
 	author: string | null;
 	cover_i: number | null;
+	first_publish_year: number | null;
 	added_at: string;
 }
 
@@ -1073,6 +1074,7 @@ export const db = {
 		title: string;
 		author: string | null;
 		cover_i: number | null;
+		first_publish_year: number | null;
 	}): Promise<void> {
 		const { data: { user } } = await supabase.auth.getUser();
 		const uid = user?.id;
@@ -1086,6 +1088,7 @@ export const db = {
 			title: (params.title || 'Untitled').trim().slice(0, 500),
 			author: params.author?.trim().slice(0, 200) ?? null,
 			cover_i: params.cover_i,
+			first_publish_year: params.first_publish_year,
 		}, { onConflict: 'user_id,book_id' });
 		if (error) throw error;
 	},

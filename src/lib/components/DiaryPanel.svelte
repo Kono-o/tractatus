@@ -417,7 +417,6 @@
   function selectBook(book: BookResult) {
     selectedBook = book;
     bookYear = book.year;
-    console.log('[diary] selectBook year:', book.year);
     bookSelected = true;
     showLogForm = false;
     editingLog = null;
@@ -445,10 +444,18 @@
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data = await res.json();
       bookDetails = data as BookDetails;
-      console.log('[diary] loadBookDetails first_publish_year:', data.first_publish_year, 'bookYear before:', bookYear);
       if (data.first_publish_year && !bookYear) {
         bookYear = data.first_publish_year;
-        console.log('[diary] bookYear set to:', bookYear);
+      }
+      if (!bookYear) {
+        try {
+          const sr = await fetch(`https://openlibrary.org/search.json?q=key:${cleanId}&limit=1&fields=first_publish_year`);
+          if (sr.ok) {
+            const sd = await sr.json();
+            const fpy = sd.docs?.[0]?.first_publish_year;
+            if (fpy) bookYear = fpy;
+          }
+        } catch {}
       }
     } catch (e) {
       console.warn('[diary] failed to load book details', e);
