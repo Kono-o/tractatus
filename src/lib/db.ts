@@ -459,6 +459,12 @@ export interface ReadingLog {
 	updated_at: string;
 }
 
+export interface ReadingLogWithAuthor extends ReadingLog {
+	author_username?: string;
+	author_avatar_seed?: string | null;
+	author_avatar_url?: string | null;
+}
+
 export interface ReadingListItem {
 	id: string;
 	user_id: string;
@@ -991,6 +997,18 @@ export const db = {
 		return (data ?? []) as ReadingLog[];
 	},
 
+	async listPublicReadingLogs(): Promise<ReadingLogWithAuthor[]> {
+		const { data, error } = await supabase
+			.from('reading_logs')
+			.select('*')
+			.order('created_at', { ascending: false })
+			.limit(50);
+		if (error) throw error;
+		const logs = (data ?? []) as ReadingLogWithAuthor[];
+		await attachReadingLogAuthors(logs);
+		return logs;
+	},
+
 	async saveReadingLog(params: {
 		id?: string | null;
 		book_id: string;
@@ -1124,6 +1142,25 @@ async function attachAuthors(essays: Essay[]): Promise<void> {
 			(e as unknown as Record<string, unknown>).author_username = a.username;
 			(e as unknown as Record<string, unknown>).author_avatar_seed = a.avatar_seed;
 			(e as unknown as Record<string, unknown>).author_avatar_url = a.avatar_url;
+		}
+	}
+}
+
+async function attachReadingLogAuthors(logs: ReadingLogWithAuthor[]): Promise<void> {
+	const ids = [...new Set(logs.map((l) => l.user_id).filter(Boolean))];
+	if (!ids.length) return;
+	const { data: authors } = await supabase
+		.from('usernames')
+		.select('user_id, username, avatar_seed, avatar_url')
+		.in('user_id', ids);
+	if (!authors) return;
+	const map = new Map(authors.map((a) => [a.user_id, a]));
+	for (const l of logs) {
+		const a = map.get(l.user_id);
+		if (a) {
+			l.author_username = a.username;
+			l.author_avatar_seed = a.avatar_seed;
+			l.author_avatar_url = a.avatar_url;
 		}
 	}
 }
