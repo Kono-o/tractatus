@@ -380,6 +380,7 @@
   });
 
   let libraryDeleteConfirmId = $state<string | null>(null);
+  let libraryLogDeleteConfirmId = $state<string | null>(null);
   let libraryTab = $state<'essays' | 'diary'>('essays');
   let libraryLogs = $state<ReadingLog[]>([]);
   let libraryLogsLoading = $state(false);
@@ -403,6 +404,28 @@
       essays = essays.filter(e => e.id !== essayId);
     } catch (e) {
       console.error('[library] delete failed', e);
+    }
+  }
+
+  function handleLibraryLogDelete(logId: string) {
+    if (libraryLogDeleteConfirmId === logId) {
+      libraryLogDeleteConfirmId = null;
+      void performLibraryLogDelete(logId);
+    } else {
+      libraryLogDeleteConfirmId = logId;
+    }
+  }
+
+  function clearLibraryLogDeleteConfirm() {
+    libraryLogDeleteConfirmId = null;
+  }
+
+  async function performLibraryLogDelete(logId: string) {
+    try {
+      await db.deleteReadingLog(logId);
+      libraryLogs = libraryLogs.filter(l => l.id !== logId);
+    } catch (e) {
+      console.error('[library] log delete failed', e);
     }
   }
 
@@ -2638,7 +2661,12 @@
             <div class="pub-empty-hint">Log a book from the Books tab.</div>
           </div>
         {:else}
-          <ReadingLogDiary logs={libraryLogs} />
+          <ReadingLogDiary
+            logs={libraryLogs}
+            onDelete={handleLibraryLogDelete}
+            deleteConfirmId={libraryLogDeleteConfirmId}
+            onBlurDelete={clearLibraryLogDeleteConfirm}
+          />
         {/if}
       {/if}
     </div>

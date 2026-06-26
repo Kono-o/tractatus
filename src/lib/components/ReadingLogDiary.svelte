@@ -1,11 +1,17 @@
 <script lang="ts">
   import type { ReadingLog } from '$lib/db';
-  import { Heart, BookMarked } from '@lucide/svelte';
+  import { Heart, BookMarked, Trash2 } from '@lucide/svelte';
 
   let {
     logs = [],
+    onDelete,
+    deleteConfirmId = null,
+    onBlurDelete,
   }: {
     logs: ReadingLog[];
+    onDelete?: (id: string) => void;
+    deleteConfirmId?: string | null;
+    onBlurDelete?: () => void;
   } = $props();
 
   function logDate(log: ReadingLog): string {
@@ -86,6 +92,22 @@
                   <div class="rld-review">{log.review}</div>
                 {/if}
               </div>
+              {#if onDelete}
+                <button
+                  type="button"
+                  class="rld-delete"
+                  class:rld-delete--confirm={deleteConfirmId === log.id}
+                  aria-label={deleteConfirmId === log.id ? 'Confirm delete' : 'Delete log'}
+                  onclick={() => onDelete(log.id)}
+                  onblur={onBlurDelete}
+                >
+                  {#if deleteConfirmId === log.id}
+                    Sure?
+                  {:else}
+                    <Trash2 class="size-3" aria-hidden="true" />
+                  {/if}
+                </button>
+              {/if}
             </div>
           {/each}
         </div>
@@ -99,7 +121,7 @@
   .rld-month { margin-bottom: 1.25rem; }
   .rld-label { font-family: var(--ui); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hint); margin-bottom: 0.5rem; padding: 0 0.2rem; }
   .rld-entries { display: flex; flex-direction: column; }
-  .rld-entry { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.5rem; border-bottom: 0.5px solid var(--border); transition: background 0.15s ease; }
+  .rld-entry { display: flex; align-items: stretch; gap: 0.6rem; padding: 0.5rem 0.5rem; border-bottom: 0.5px solid var(--border); transition: background 0.15s ease; }
   .rld-entry:last-child { border-bottom: none; }
   .rld-entry:hover { background: var(--surf); }
   .rld-day { display: inline-block; font-family: var(--font-mono); font-size: 0.78rem; color: var(--hint); min-width: 1.8rem; text-align: center; flex-shrink: 0; padding-top: 0.1rem; }
@@ -114,4 +136,9 @@
   .rld-liked--yes { color: #ef4444; }
   .rld-liked--no { color: var(--hint); opacity: 0.5; }
   .rld-review { font-family: var(--ss); font-size: 0.72rem; line-height: 1.45; color: var(--text-muted); margin-top: 2px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-clamp: 2; }
+  .rld-delete { display: flex; align-items: center; justify-content: center; width: 28px; border: none; background: transparent; color: var(--hint); cursor: pointer; flex-shrink: 0; font-family: var(--ui); font-size: 8px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; transition: color 120ms ease, background-color 120ms ease; border-radius: 6px; margin: 0.375rem 0; align-self: stretch; }
+  .rld-delete:hover { color: var(--muted); background: var(--surf); }
+  .rld-delete:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -1.5px; }
+  .rld-delete--confirm { color: #dc2626; background: #fef2f2; }
+  :global(.dark) .rld-delete--confirm { color: #fca5a5; background: #2a1a1a; }
 </style>

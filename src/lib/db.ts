@@ -937,12 +937,16 @@ export const db = {
 	},
 
 	async getPublicReadingLogsByUser(userId: string, limit = 200): Promise<ReadingLogWithAuthor[]> {
-		const { data } = await supabase
+		const { data, error } = await supabase
 			.from('reading_logs')
 			.select('*')
 			.eq('user_id', userId)
-			.order('end_date', { ascending: false })
+			.order('end_date', { ascending: false, nullsFirst: false })
 			.limit(limit);
+		if (error) {
+			console.error('[db] getPublicReadingLogsByUser error', error);
+			return [];
+		}
 		const logs = (data || []) as ReadingLogWithAuthor[];
 		await attachReadingLogAuthors(logs);
 		return logs;
