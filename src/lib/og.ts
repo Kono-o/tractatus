@@ -123,7 +123,7 @@ function readingTime(content: string): string {
   return `${min} min read`;
 }
 
-export async function profileOG(username: string, essayCount: number, createdAt: string | null): Promise<Response> {
+export async function profileOG(username: string, essayCount: number, logCount: number, createdAt: string | null): Promise<Response> {
   return render(
     base(
       brand(),

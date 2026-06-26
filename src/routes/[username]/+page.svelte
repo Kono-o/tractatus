@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { db, supabase, type Essay } from '$lib/db';
+  import { db, supabase, type Essay, type ReadingLogWithAuthor } from '$lib/db';
   import ProfileView from '$lib/components/ProfileView.svelte';
   import type { PageData } from './$types';
 
@@ -13,9 +13,11 @@
 
   let profile = $state<{ user_id: string; username: string; avatar_seed: string | null; avatar_url: string | null; created_at: string | null } | null>(data.profile);
   let essays = $state<Essay[]>(data.essays);
+  let logs = $state<ReadingLogWithAuthor[]>(data.logs);
   let loading = $state(data.profile === null);
   let error = $state<string | null>(null);
   let essayCount = $state<number | null>(data.essayCount);
+  let logCount = $state<number | null>(data.logCount);
 
   $effect(() => {
     if (preview) {
@@ -36,14 +38,23 @@
         return;
       }
       profile = u;
-      const { count } = await supabase
+      const { count: ec } = await supabase
         .from('essays')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', u.user_id)
         .eq('is_public', true);
-      const found = await db.getPublicEssaysByUser(u.user_id);
-      essayCount = count ?? 0;
-      essays = found;
+      const { count: lc } = await supabase
+        .from('reading_logs')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', u.user_id);
+      const [foundEssays, foundLogs] = await Promise.all([
+        db.getPublicEssaysByUser(u.user_id),
+        db.getPublicReadingLogsByUser(u.user_id),
+      ]);
+      essayCount = ec ?? 0;
+      logCount = lc ?? 0;
+      essays = foundEssays;
+      logs = foundLogs;
     } catch (e: any) {
       console.error(e);
       error = 'Failed to load profile.';
@@ -68,9 +79,9 @@
 <svelte:head>
   <title>{profile?.username || 'User'} · Tractatus</title>
   {#if profile}
-    <meta name="description" content="{profile.username}'s profile on Tractatus — {essayCount ?? 0} {essayCount === 1 ? 'essay' : 'essays'} written." />
+    <meta name="description" content="{profile.username}'s profile on Tractatus — {essayCount ?? 0} {essayCount === 1 ? 'essay' : 'essays'}, {logCount ?? 0} {logCount === 1 ? 'log' : 'logs'}." />
     <meta property="og:title" content="{profile.username} · Tractatus" />
-    <meta property="og:description" content="{profile.username}'s profile on Tractatus — {essayCount ?? 0} {essayCount === 1 ? 'essay' : 'essays'} written." />
+    <meta property="og:description" content="{profile.username}'s profile on Tractatus — {essayCount ?? 0} {essayCount === 1 ? 'essay' : 'essays'}, {logCount ?? 0} {logCount === 1 ? 'log' : 'logs'}." />
     <meta property="og:image" content="{$page.url.origin}/api/og/{profile.username}" />
     <meta property="og:url" content="{$page.url.origin}/@{profile.username}" />
     <meta property="og:type" content="profile" />
@@ -96,7 +107,9 @@
     avatarUrl={profile.avatar_url}
     createdAt={profile.created_at}
     {essayCount}
+    {logCount}
     {essays}
+    {logs}
     onEssayClick={handleEssayClick}
   />
 {/if}

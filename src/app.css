@@ -2909,7 +2909,7 @@ span.boot-panel-placeholder::after,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 3.75rem;
+  width: 3.75rem;
   height: 28px;
   padding: 0 0.5rem;
   border-radius: 0.25rem;

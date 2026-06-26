@@ -451,6 +451,7 @@ export interface ReadingLog {
 	cover_url: string | null;
 	rating: number | null;
 	liked: boolean | null;
+	reread: boolean;
 	review: string | null;
 	read_date: string;
 	start_date: string;
@@ -935,6 +936,18 @@ export const db = {
 		return essays;
 	},
 
+	async getPublicReadingLogsByUser(userId: string, limit = 200): Promise<ReadingLogWithAuthor[]> {
+		const { data } = await supabase
+			.from('reading_logs')
+			.select('*')
+			.eq('user_id', userId)
+			.order('end_date', { ascending: false })
+			.limit(limit);
+		const logs = (data || []) as ReadingLogWithAuthor[];
+		await attachReadingLogAuthors(logs);
+		return logs;
+	},
+
 	/** Search all public essays (includes the current user's published work). */
 	async searchPublicEssays(query: string, limit = 50): Promise<Essay[]> {
 		if (!checkClientRateLimit('search', 'global', 10, 60_000)) {
@@ -1017,6 +1030,7 @@ export const db = {
 		cover_url: string | null;
 		rating: number | null;
 		liked: boolean | null;
+		reread: boolean;
 		review: string | null;
 		start_date: string;
 		end_date: string | null;
@@ -1037,6 +1051,7 @@ export const db = {
 			cover_url: params.cover_url?.trim().slice(0, 500) ?? null,
 			rating: params.rating,
 			liked: params.liked,
+			reread: params.reread,
 			review: params.review?.trim().slice(0, 5000) ?? null,
 			read_date: params.start_date,
 			start_date: params.start_date,

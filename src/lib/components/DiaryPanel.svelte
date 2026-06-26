@@ -153,6 +153,7 @@
     reviewText = log.review || '';
     const r = log.rating || 0;
     liked = log.liked === true ? true : null;
+    reread = true;
     rating = Math.round(r * 2);
     startDate = log.start_date || log.read_date || '';
     endDate = log.end_date || '';
@@ -167,8 +168,9 @@
     reviewText = '';
     rating = 0;
     liked = null;
+    reread = false;
     startDate = new Date().toISOString().split('T')[0];
-    endDate = '';
+    endDate = new Date().toISOString().split('T')[0];
     logLastSavedAt = null;
     saveError = null;
     logSnapshot = null;
@@ -194,6 +196,13 @@
   let publicReadingLogs: ReadingLogWithAuthor[] = $state([]);
   let publicReadingLogsLoaded = $state(false);
   let viewedPublicReview: ReadingLogWithAuthor | null = $state<ReadingLogWithAuthor | null>(null);
+  let publicLogsRefreshTimer: ReturnType<typeof setInterval> | undefined = $state();
+
+  function refreshPublicReadingLogs() {
+    db.listPublicReadingLogs().then(logs => {
+      publicReadingLogs = logs;
+    }).catch(() => {});
+  }
 
   $effect(() => {
     if (!publicReadingLogsLoaded) {
@@ -203,6 +212,13 @@
       }).catch(() => {
         publicReadingLogsLoaded = true;
       });
+    }
+  });
+
+  $effect(() => {
+    if (publicReadingLogsLoaded) {
+      publicLogsRefreshTimer = setInterval(refreshPublicReadingLogs, 30_000);
+      return () => { clearInterval(publicLogsRefreshTimer); };
     }
   });
 
@@ -247,7 +263,8 @@
   let reviewText = $state('');
   let rating = $state<number>(0);
   let liked: boolean | null = $state(null);
-  let startDate = $state(new Date().toISOString().split('T')[0]);
+  let reread = $state(false);
+  let startDate = $state('');
   let endDate = $state('');
   let saveError = $state<string | null>(null);
   let deleteConfirmId = $state<string | null>(null);
@@ -257,10 +274,9 @@
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   let logIsDirty = $derived(logSnapshot !== null && serializeForm() !== logSnapshot);
-  let logSaveStatus = $derived(logSaving ? 'saving' : !logLastSavedAt ? 'unsaved' : logIsDirty ? 'unsaved' : 'saved');
 
   function serializeForm() {
-    return JSON.stringify({ reviewText, rating, liked, startDate, endDate });
+    return JSON.stringify({ reviewText, rating, liked, reread, startDate, endDate });
   }
 
   function takeLogSnapshot() {
@@ -510,11 +526,12 @@
     editingLog = null;
     bookDetails = null;
     bookDetailsLoading = true;
+    rereviewed = false;
     void loadBookDetails(book.id);
 
-    const existing = logs.find(l => l.book_id === book.id);
-    if (existing) {
-      populateFormFromLog(existing);
+    const matching = logs.filter(l => l.book_id === book.id).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    if (matching.length > 0) {
+      populateFormFromLog(matching[0]);
     } else {
       clearForm();
     }
@@ -524,10 +541,10 @@
     const _logs = logs;
     const book = selectedBook;
     if (!book || !_logs.length) return;
-    if (editingLog) return;
-    const existing = _logs.find(l => l.book_id === book.id);
-    if (existing) {
-      populateFormFromLog(existing);
+    if (editingLog || rereviewed) return;
+    const matching = _logs.filter(l => l.book_id === book.id).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    if (matching.length > 0) {
+      populateFormFromLog(matching[0]);
     }
   });
 
@@ -539,6 +556,7 @@
     bookDetailsLoading = false;
     showCoverLightbox = false;
     editingLog = null;
+    rereviewed = false;
     if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
   }
 
@@ -548,6 +566,18 @@
 
   function clearReviewDetail() {
     viewedPublicReview = null;
+  }
+
+  let hasExistingLogs = $derived(selectedBook ? logs.some(l => l.book_id === selectedBook.id) : false);
+  let rereviewed = $state(false);
+
+  function rereview() {
+    clearForm();
+    startDate = '';
+    endDate = '';
+    reread = true;
+    editingLog = null;
+    rereviewed = true;
   }
 
   async function loadBookDetails(olid: string) {
@@ -608,15 +638,26 @@
   }
 
   function toggleLiked() {
-    liked = liked === null ? true : null;
+    liked = liked === null ? true : liked === true ? false : null;
   }
 
   async function doSaveLog() {
     if (!selectedBook) return;
+    if (!startDate || !endDate) return;
     logSaving = true;
     saveError = null;
     try {
       const effectiveRating = rating / 2;
+
+      const duplicate = logs.find(l =>
+        l.book_id === selectedBook.id &&
+        l.start_date === startDate &&
+        l.id !== editingLog?.id
+      );
+      if (duplicate) {
+        throw new Error('You already logged this book on this date.');
+      }
+
       const saved = await db.saveReadingLog({
         id: editingLog?.id ?? null,
         book_id: selectedBook.id,
@@ -625,6 +666,7 @@
         cover_url: selectedBook.coverUrl,
         rating: effectiveRating > 0 ? effectiveRating : null,
         liked: liked,
+        reread: reread,
         review: reviewText.trim() || null,
         start_date: startDate,
         end_date: endDate || null,
@@ -637,6 +679,7 @@
       }
       logLastSavedAt = Date.now();
       takeLogSnapshot();
+      refreshPublicReadingLogs();
     } catch (e: any) {
       saveError = e.message || 'Failed to save';
     } finally {
@@ -653,6 +696,7 @@
     try {
       await db.deleteReadingLog(id);
       logs = logs.filter((l) => l.id !== id);
+      refreshPublicReadingLogs();
     } catch (e) {
       console.warn('[diary] delete failed', e);
     }
@@ -822,32 +866,33 @@
                 </div>
                 <div class="pf-card-book-title">{log.title || 'Untitled'}</div>
                 <div class="pf-card-book-author">{log.author || 'Unknown'}</div>
-                {#if log.rating}
-                  <div class="pf-card-stars">
-                    {#each [1,2,3,4,5] as val}
-                      {@const half = Math.round(log.rating! * 2)}
-                      <svg class="pf-card-star" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        {#if val * 2 <= half}
-                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#f59e0b" />
-                        {:else if val * 2 - 1 === half}
-                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" clip-path="inset(0 50% 0 0)" fill="#f59e0b" />
-                        {:else}
-                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="none" />
-                        {/if}
-                      </svg>
-                    {/each}
+                {#if log.rating || log.liked !== null || log.reread}
+                  <div class="pf-card-reactions">
+                    {#if log.rating}
+                      <span class="pf-card-stars">
+                        {#each [1,2,3,4,5] as val}
+                          {@const half = Math.round(log.rating! * 2)}
+                          <svg class="pf-card-star" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            {#if val * 2 <= half}
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#f59e0b" />
+                            {:else if val * 2 - 1 === half}
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" clip-path="inset(0 50% 0 0)" fill="#f59e0b" />
+                            {:else}
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="none" />
+                            {/if}
+                          </svg>
+                        {/each}
+                      </span>
+                    {/if}
                     {#if log.liked !== null}
                       <span class="pf-card-liked" class:pf-card-liked--yes={log.liked === true} class:pf-card-liked--no={log.liked === false}>
                         <Heart class="size-3" fill={log.liked === true ? '#ef4444' : 'none'} aria-hidden="true" />
                       </span>
                     {/if}
-                  </div>
-                {:else if log.liked !== null}
-                  <div class="pf-card-stars">
-                    <span class="pf-card-liked" class:pf-card-liked--yes={log.liked === true} class:pf-card-liked--no={log.liked === false}>
-                      <Heart class="size-3" fill={log.liked === true ? '#ef4444' : 'none'} aria-hidden="true" />
-                    </span>
+                    {#if log.reread}
+                      <span class="pf-card-reread"><svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>
+                    {/if}
                   </div>
                 {/if}
                 {#if log.review}
@@ -949,23 +994,14 @@
                 {/each}
               </div>
               <div class="review-actions">
-                <button type="button" class="review-heart" class:review-heart--on={liked === true} onclick={toggleLiked} aria-label="Toggle liked">
+                <button type="button" class="review-heart" class:review-heart--on={liked === true} class:review-heart--off={liked === false} onclick={toggleLiked} aria-label="Toggle liked">
                     <Heart class="size-5" fill={liked === true ? '#ef4444' : 'none'} aria-hidden="true" />
                 </button>
-                <span
-                  class="review-chip"
-                  class:review-chip--unsaved={logSaveStatus === 'unsaved'}
-                  class:review-chip--saving={logSaveStatus === 'saving'}
-                  class:review-chip--saved={logSaveStatus === 'saved'}
-                >
-                  {#if logSaveStatus === 'saving'}
-                    Saving
-                  {:else if logSaveStatus === 'saved'}
-                    Saved
-                  {:else}
-                    Unsaved
-                  {/if}
-                </span>
+                {#if hasExistingLogs}
+                  <button type="button" class="review-rereview" onclick={rereview} aria-label="Re-review">
+                    RE-REVIEW?
+                  </button>
+                {/if}
               </div>
             </div>
             <textarea id="lr" class="review-ta" bind:value={reviewText} placeholder="What did you think?" maxlength={5000}></textarea>
@@ -1083,28 +1119,32 @@
               <div class="rv-detail-book-author">{viewedPublicReview.author || 'Unknown'}</div>
             </div>
           </div>
-          {#if viewedPublicReview.rating || viewedPublicReview.liked !== null}
-            <div class="rv-detail-stars">
+          {#if viewedPublicReview.rating || viewedPublicReview.liked !== null || viewedPublicReview.reread}
+            <div class="rv-detail-reactions">
               {#if viewedPublicReview.rating}
-                {#each [1,2,3,4,5] as val}
-                  {@const half = Math.round(viewedPublicReview.rating! * 2)}
-                  <svg class="rv-detail-star" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    {#if val * 2 <= half}
-                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#f59e0b" />
-                    {:else if val * 2 - 1 === half}
-                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" clip-path="inset(0 50% 0 0)" fill="#f59e0b" />
-                    {:else}
-                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="none" />
-                    {/if}
-                  </svg>
-                {/each}
+                <span class="rv-detail-stars">
+                  {#each [1,2,3,4,5] as val}
+                    {@const half = Math.round(viewedPublicReview.rating! * 2)}
+                    <svg class="rv-detail-star" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      {#if val * 2 <= half}
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#f59e0b" />
+                      {:else if val * 2 - 1 === half}
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" clip-path="inset(0 50% 0 0)" fill="#f59e0b" />
+                      {:else}
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="none" />
+                      {/if}
+                    </svg>
+                  {/each}
+                </span>
               {/if}
               {#if viewedPublicReview.liked !== null}
                 <span class="rv-detail-liked" class:rv-detail-liked--yes={viewedPublicReview.liked === true} class:rv-detail-liked--no={viewedPublicReview.liked === false}>
                   <Heart class="size-4" fill={viewedPublicReview.liked === true ? '#ef4444' : 'none'} aria-hidden="true" />
-                  <span class="rv-detail-liked-label">{viewedPublicReview.liked === true ? 'Liked' : 'Didn\'t like'}</span>
                 </span>
+              {/if}
+              {#if viewedPublicReview.reread}
+                <span class="rv-detail-reread"><svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>
               {/if}
             </div>
           {/if}
@@ -1171,11 +1211,13 @@
   .pf-card-date { white-space: nowrap; }
   .pf-card-book-title { font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--ink); white-space: normal; overflow: visible; word-break: break-word; }
   .pf-card-book-author { font-size: 12px; color: var(--text-muted); }
-  .pf-card-stars { display: flex; gap: 2px; align-items: center; margin-top: 4px; }
+  .pf-card-reactions { display: flex; align-items: center; gap: 2px; margin-top: 4px; flex-wrap: wrap; }
+  .pf-card-stars { display: flex; gap: 2px; }
   .pf-card-star { display: block; }
   .pf-card-liked { display: inline-flex; align-items: center; margin-left: 5px; line-height: 1; }
   .pf-card-liked--yes { color: #ef4444; }
   .pf-card-liked--no { color: var(--hint); opacity: 0.5; }
+  .pf-card-reread { display: inline-flex; align-items: center; color: var(--hint); margin-left: 5px; }
   .pf-card-review { font-family: var(--ss); font-size: 13px; line-height: 1.55; color: var(--text-muted); overflow: hidden; max-height: 4em; mask-image: linear-gradient(to bottom, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); margin-top: 4px; }
   .pf-card--skel { pointer-events: none; }
   .pf-skel { display: block; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; border-radius: 4px; }
@@ -1264,7 +1306,7 @@
   .book-btn--remove:hover { background: color-mix(in srgb, #ef4444 10%, transparent); border-color: #ef4444; }
 
   /* Panel scroll area */
-  .panel-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; }
+  .panel-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 0.75rem; }
   .panel-scroll::-webkit-scrollbar { width: 4px; }
   .panel-scroll::-webkit-scrollbar-track { background: transparent; }
   .panel-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -1288,17 +1330,13 @@
   .review-heart:hover { color: #ef4444; transform: scale(1.15); }
   .review-heart:active { transform: scale(0.9); }
   .review-heart--on { color: #ef4444; }
+  .review-heart--off { color: var(--hint); opacity: 0.5; }
+  .review-rereview { background: transparent; border: 1px solid var(--border); cursor: pointer; padding: 0 0.75rem; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 0.25rem; color: var(--ink); font-size: 9px; font-weight: 600; font-family: var(--ui); letter-spacing: 0.04em; transition: background 0.12s, border-color 0.12s; white-space: nowrap; }
+  .review-rereview:hover { border-color: var(--text-muted); }
   .review-ta { width: 100%; background: transparent; border: 0.5px solid var(--border); border-radius: 8px; padding: 10px 11px; font-size: 0.8rem; color: var(--ink); resize: none; font-family: inherit; outline: none; box-sizing: border-box; line-height: 1.5; transition: border-color 0.12s; flex: 1; min-height: 0; }
   .review-ta:focus { border-color: var(--text-muted); }
   .review-ta::placeholder { color: var(--hint); opacity: 0.5; }
   .review-dates { display: flex; align-items: flex-end; gap: 8px; }
-  .review-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 3.75rem; height: 26px; padding: 0 0.5rem; border-radius: 0.25rem; font-family: var(--ui); font-size: 9px; font-weight: 600; line-height: 1; letter-spacing: 0.04em; text-transform: uppercase; border: 0.5px solid; transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease; }
-  .review-chip--unsaved { background: #fef3c7; color: #92400e; border-color: #fbbf24; }
-  .review-chip--saving { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
-  .review-chip--saved { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
-  :global(.dark) .review-chip--unsaved { background: #3a2f10; color: #fbbf24; border-color: #a16207; }
-  :global(.dark) .review-chip--saving { background: #1e2a4a; color: #93c5fd; border-color: #3b82f6; }
-  :global(.dark) .review-chip--saved { background: #0f2a1f; color: #34d399; border-color: #059669; }
   .review-err { color: #ef4444; font-size: 11px; }
 
   /* Book details */
@@ -1347,12 +1385,13 @@
   .rv-detail-book-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
   .rv-detail-book-title { font-weight: 600; font-size: 14px; color: var(--ink); white-space: normal; overflow: visible; }
   .rv-detail-book-author { font-size: 12px; color: var(--text-muted); }
-  .rv-detail-stars { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+  .rv-detail-reactions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+  .rv-detail-stars { display: flex; gap: 3px; }
   .rv-detail-star { display: block; }
   .rv-detail-liked { display: inline-flex; align-items: center; gap: 5px; margin-left: 6px; color: var(--hint); }
   .rv-detail-liked--yes { color: #ef4444; }
   .rv-detail-liked--no { color: var(--hint); opacity: 0.6; }
-  .rv-detail-liked-label { font-size: 12px; font-weight: 500; }
+  .rv-detail-reread { display: inline-flex; align-items: center; color: var(--hint); margin-left: 5px; }
   .rv-detail-text { font-size: 14px; line-height: 1.65; color: var(--text); white-space: pre-wrap; word-break: break-word; }
   .rv-detail-text--empty { color: var(--hint); font-style: italic; }
 </style>
