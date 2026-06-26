@@ -101,29 +101,15 @@ html.theme-transitioning * {
   color: var(--badge-public-text);
   border-color: var(--badge-public-border);
 }
-.dark .library-card-badge {
-  background: var(--badge-draft-bg);
-  color: var(--badge-draft-text);
-  border-color: var(--badge-draft-border);
-}
-.dark .library-card-badge--public {
-  background: var(--badge-public-bg);
-  color: var(--badge-public-text);
-  border-color: var(--badge-public-border);
-}
 .dark .update-badge {
   background: var(--badge-public-bg);
   color: var(--badge-public-text);
   border-color: var(--badge-public-border);
 }
-.dark .library-card--public {
-  border-left-color: var(--badge-public-border);
-}
 .dark mark,
 .dark .markdown-content mark,
 .dark .reader-prose mark,
-.dark .pub-feed-card-excerpt mark,
-.dark .library-card-excerpt mark {
+.dark .pub-feed-card-excerpt mark {
   background: var(--mark-bg);
   color: var(--text);
 }
@@ -186,13 +172,6 @@ html.theme-transitioning * {
   background: var(--error-bg);
   color: var(--error-text);
   border-color: var(--error-border);
-}
-.dark .library-card-delete--hold {
-  background: var(--error-bg);
-  color: var(--error-text);
-}
-.dark .library-card-delete-fill {
-  background: #7f1d1d;
 }
 .dark .editor-action-btn--danger {
   background: #2a1a1a;
@@ -262,9 +241,6 @@ html.theme-transitioning * {
 }
 .dark .pub-feed-card:active {
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
-}
-.dark .library-card:hover {
-  box-shadow: 0 1px 6px rgb(0 0 0 / 0.15);
 }
 
 @media (min-width: 640px) {
@@ -3911,187 +3887,36 @@ span.boot-panel-placeholder::after,
   background: var(--surf);
 }
 
-.library-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  padding: 0.5rem 0.75rem 1rem;
-}
+/* ── Library (My Shelf) ── */
+.lib-tabs { display: flex; gap: 0; padding: 0.5rem 0.75rem 0; }
+.lib-tab-btn { flex: 1; height: 28px; border: none; background: transparent; font-family: var(--ui); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--hint); cursor: pointer; transition: color 150ms ease; border-bottom: 1.5px solid var(--border); margin-bottom: -1px; }
+.lib-tab-btn:hover { color: var(--text-muted); }
+.lib-tab-btn--active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 700; }
 
-.library-card {
-  display: flex;
-  align-items: stretch;
-  border: 0.5px solid var(--border);
-  border-radius: 8px;
-  background: var(--surf);
-  overflow: hidden;
-  transition:
-    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.library-card--public {
-  border-left: 2.5px solid #86efac;
-}
-
-.library-card:not(.library-card--public) {
-  border-left: 2.5px solid var(--border);
-}
-
-.library-card:hover {
-  border-color: var(--muted);
-  box-shadow: 0 1px 6px rgb(0 0 0 / 0.035);
-}
-
-.library-card-body {
-  flex: 1;
-  min-width: 0;
-  display: block;
-  text-align: left;
-  padding: 0.75rem 0.75rem 0.625rem;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-  transition: background-color 120ms ease;
-}
-.library-card-body:hover {
-  background: color-mix(in srgb, var(--accent) 3%, transparent);
-}
-.library-card-body:focus-visible {
-  outline: 1.5px solid var(--ink);
-  outline-offset: -1.5px;
-}
-
-.library-card-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.library-card-title {
-  font-family: var(--dm);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.3;
-  letter-spacing: 0.02em;
-  color: var(--ink);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.library-card-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 3.75rem;
-  height: 1.25rem;
-  padding: 0 0.45rem;
-  border-radius: 0.25rem;
-  border: 0.5px solid;
-  font-family: var(--ui);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  flex-shrink: 0;
-  cursor: pointer;
-  color: #92400e;
-  background: #fef3c7;
-  border-color: #fbbf24;
-}
-
-.library-card-badge--public {
-  color: #065f46;
-  background: #d1fae5;
-  border-color: #6ee7b7;
-}
-
-.library-card-excerpt {
-  margin-top: 0.25rem;
-  font-family: var(--ss);
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text-muted);
-  max-height: 3.6em;
-  overflow: hidden;
-  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-}
-
-.library-card-excerpt mark {
-  background: #b4c6d8;
-  color: var(--text);
-  padding: 0 0.1em;
-  border-radius: 1px;
-}
-
-.library-card-excerpt blockquote {
-  border-left: 2px solid var(--border);
-  padding-left: 0.5rem;
-  margin: 0.25em 0;
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.library-card-footer {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  margin-top: 0.375rem;
-  font-family: var(--ui);
-  font-size: 10px;
-  color: var(--hint);
-}
-
-.library-card-dot {
-  color: var(--border);
-  font-size: 10px;
-  line-height: 1;
-}
-
-.library-card-delete {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  min-height: 100%;
-  border: none;
-  background: transparent;
-  color: var(--hint);
-  cursor: pointer;
-  flex-shrink: 0;
-  font-family: var(--ui);
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  transition: color 120ms ease, background-color 120ms ease;
-}
-.library-card-delete:hover {
-  color: var(--muted);
-  background: color-mix(in srgb, var(--accent) 3%, transparent);
-}
-.library-card-delete:focus-visible {
-  outline: 1.5px solid var(--ink);
-  outline-offset: -1.5px;
-}
-
-.library-card-delete--confirm {
-  color: #dc2626;
-  background: #fef2f2;
-}
-
-.dark .library-card-delete--confirm {
-  color: #fca5a5;
-  background: #2a1a1a;
-}
+.lib-essay-list { display: flex; flex-direction: column; padding: 0.625rem 0.75rem 1rem; }
+.lib-essay-card { display: flex; align-items: stretch; border-bottom: 0.5px solid var(--border); }
+.lib-essay-card:last-child { border-bottom: none; }
+.lib-essay-card--public { }
+.lib-essay-body { flex: 1; min-width: 0; display: block; text-align: left; padding: 0.625rem 0.5rem; border: none; background: transparent; cursor: pointer; color: inherit; font: inherit; border-radius: 6px; transition: background-color 120ms ease; }
+.lib-essay-body:hover { background: var(--surf); }
+.lib-essay-body:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -1.5px; }
+.lib-essay-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.lib-essay-title { font-family: var(--dm); font-size: 14px; font-weight: 600; line-height: 1.3; color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-essay-badge { display: inline-flex; align-items: center; justify-content: center; width: 3.75rem; height: 1.25rem; padding: 0 0.45rem; border-radius: 0.25rem; border: 0.5px solid; font-family: var(--ui); font-size: 8px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; flex-shrink: 0; cursor: pointer; color: #92400e; background: #fef3c7; border-color: #fbbf24; }
+.lib-essay-badge--public { color: #065f46; background: #d1fae5; border-color: #6ee7b7; }
+.dark .lib-essay-badge { background: #3a2f10; color: #fbbf24; border-color: #a16207; }
+.dark .lib-essay-badge--public { background: #0f2a1f; color: #34d399; border-color: #059669; }
+.lib-essay-excerpt { margin-top: 0.2rem; font-family: var(--ss); font-size: 11px; line-height: 1.45; color: var(--text-muted); max-height: 3.3em; overflow: hidden; mask-image: linear-gradient(to bottom, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); }
+.lib-essay-excerpt mark { background: #b4c6d8; color: var(--text); padding: 0 0.1em; border-radius: 1px; }
+.lib-essay-excerpt blockquote { border-left: 2px solid var(--border); padding-left: 0.5rem; margin: 0.25em 0; color: var(--text-muted); font-style: italic; }
+.dark .lib-essay-excerpt mark { background: #3a4a5a; }
+.lib-essay-footer { display: flex; align-items: center; gap: 0.25rem; margin-top: 0.3rem; font-family: var(--ui); font-size: 10px; color: var(--hint); }
+.lib-essay-dot { color: var(--border); font-size: 10px; line-height: 1; }
+.lib-essay-delete { display: flex; align-items: center; justify-content: center; width: 28px; border: none; background: transparent; color: var(--hint); cursor: pointer; flex-shrink: 0; font-family: var(--ui); font-size: 8px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; transition: color 120ms ease, background-color 120ms ease; border-radius: 6px; margin: 0.375rem 0; }
+.lib-essay-delete:hover { color: var(--muted); background: var(--surf); }
+.lib-essay-delete:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -1.5px; }
+.lib-essay-delete--confirm { color: #dc2626; background: #fef2f2; }
+.dark .lib-essay-delete--confirm { color: #fca5a5; background: #2a1a1a; }
 
 .pub-article {
   padding: 1rem 1rem 1.5rem;

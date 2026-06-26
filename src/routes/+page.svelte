@@ -20,6 +20,7 @@
     type Essay,
     slugifyTitle,
     estimateReadTimeMinutes,
+    type ReadingLog,
   } from '$lib/db';
   import AuthScreen from '$lib/components/AuthScreen.svelte';
   import RichEditor from '$lib/components/RichEditor.svelte';
@@ -32,6 +33,7 @@
   import { setAppIcon as _setAppIcon } from '$lib/icon-switcher';
   import DiaryPanel from '$lib/components/DiaryPanel.svelte';
   import EssayView from '$lib/components/EssayView.svelte';
+  import ReadingLogDiary from '$lib/components/ReadingLogDiary.svelte';
   import type { User as SupabaseUser } from '@supabase/supabase-js';
   import {
     preprocessMarkdown,
@@ -87,7 +89,6 @@
     Upload,
     Newspaper,
     BookOpen,
-    BookMarked,
     Library as LibraryIcon,
   } from '@lucide/svelte';
 
@@ -379,6 +380,9 @@
   });
 
   let libraryDeleteConfirmId = $state<string | null>(null);
+  let libraryTab = $state<'essays' | 'diary'>('essays');
+  let libraryLogs = $state<ReadingLog[]>([]);
+  let libraryLogsLoading = $state(false);
 
   function handleLibraryDelete(essayId: string) {
     if (libraryDeleteConfirmId === essayId) {
@@ -1525,6 +1529,18 @@
     }
   }
 
+  async function loadLibraryLogs() {
+    if (!currentUser) return;
+    libraryLogsLoading = true;
+    try {
+      libraryLogs = await db.listReadingLogs();
+    } catch (e) {
+      console.warn('[library] load logs failed', e);
+    } finally {
+      libraryLogsLoading = false;
+    }
+  }
+
   async function loadPublicFeed() {
     // Deduplicate rapid/overlapping refreshes. If a refresh is in progress or
     // one completed very recently, skip to avoid duplicate work (e.g., pull-to-refresh
@@ -1760,6 +1776,7 @@
 
       // Refresh from DB to guarantee the essay is persisted and visible in Library
       void loadEssays().catch(() => {});
+      void loadLibraryLogs().catch(() => {});
 
       if (forcePublic) {
         void loadPublicFeed().catch(() => {});
@@ -1858,6 +1875,7 @@
     isWriting = false;
     // Refresh list in background
     void loadEssays();
+    void loadLibraryLogs();
   }
 
   async function handleWriteButton() {
@@ -2100,6 +2118,7 @@
     }
     if (currentUser && hasInitialLoad && !essaysLoadedOnce) {
       void loadEssays();
+      void loadLibraryLogs();
     }
     if (!currentUser) {
       essays = [];
@@ -2522,32 +2541,47 @@
     </div>
   {:else if currentUser && viewMode === 'library'}
     <div class="pub-scroll no-scrollbar">
-      {#if essaysLoading && !essaysLoadedOnce}
-        <div class="pub-empty">Loading your writings…</div>
-      {:else if filteredLibraryEssays.length === 0}
-        <div class="pub-empty">
-          {#if librarySearchQuery}
-            <div class="pub-empty-title">No essays match "{librarySearchQuery.trim()}".</div>
-          {:else}
-            <div class="pub-empty-title">No writings yet.</div>
-            <div class="pub-empty-hint">Tap the write button to start your first essay.</div>
-          {/if}
-        </div>
+      <div class="lib-tabs" role="group" aria-label="Library section">
+        <button
+          type="button"
+          class="lib-tab-btn"
+          class:lib-tab-btn--active={libraryTab === 'essays'}
+          onclick={() => libraryTab = 'essays'}
+        >Essays</button>
+        <button
+          type="button"
+          class="lib-tab-btn"
+          class:lib-tab-btn--active={libraryTab === 'diary'}
+          onclick={() => libraryTab = 'diary'}
+        >Diary</button>
+      </div>
+      {#if libraryTab === 'essays'}
+        {#if essaysLoading && !essaysLoadedOnce}
+          <div class="pub-empty">Loading your writings…</div>
+        {:else if filteredLibraryEssays.length === 0}
+          <div class="pub-empty">
+            {#if librarySearchQuery}
+              <div class="pub-empty-title">No essays match "{librarySearchQuery.trim()}".</div>
+            {:else}
+              <div class="pub-empty-title">No writings yet.</div>
+              <div class="pub-empty-hint">Tap the write button to start your first essay.</div>
+            {/if}
+          </div>
         {:else}
-          <div class="library-cards">
+          <div class="lib-essay-list">
             {#each filteredLibraryEssays as essay (essay.id)}
               {@const excerpt = libraryExcerpts.get(essay.id)}
-              <div class="library-card" class:library-card--public={essay.is_public}>
+              <div class="lib-essay-card" class:lib-essay-card--public={essay.is_public}>
                 <button
                   type="button"
-                  class="library-card-body"
+                  class="lib-essay-body"
                   onclick={() => openEditorForEssay(essay)}
                 >
-                  <div class="library-card-top">
-                    <div class="library-card-title">{essay.title || 'Untitled'}</div>
+                  <div class="lib-essay-top">
+                    <div class="lib-essay-title">{essay.title || 'Untitled'}</div>
                     <span
-                      class="library-card-badge"
-                      class:library-card-badge--public={essay.is_public}
+                      class="lib-essay-badge"
+                      class:lib-essay-badge--public={essay.is_public}
                       role="button"
                       tabindex="0"
                       onclick={(e) => { e.stopPropagation(); toggleLibraryPublish(essay); }}
@@ -2557,9 +2591,9 @@
                     </span>
                   </div>
                   {#if excerpt}
-                    <div class="library-card-excerpt">{@html excerpt}</div>
+                    <div class="lib-essay-excerpt">{@html excerpt}</div>
                   {/if}
-                  <div class="library-card-footer">
+                  <div class="lib-essay-footer">
                     <span>{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
                     {#if essay.is_public && essay.author_username}
                       <span role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
@@ -2569,18 +2603,18 @@
                         <Link class="size-4" aria-hidden="true" />
                       </span>
                     {/if}
-                    <span class="library-card-dot" aria-hidden="true">·</span>
+                    <span class="lib-essay-dot" aria-hidden="true">·</span>
                     <span>{formatFeedDate(essay.updated_at)}</span>
                     {#if essay.is_public && essay.published_at}
-                      <span class="library-card-dot" aria-hidden="true">·</span>
+                      <span class="lib-essay-dot" aria-hidden="true">·</span>
                       <span>Published {formatFeedDate(essay.published_at)}</span>
-        {/if}
-      </div>
+                    {/if}
+                  </div>
                 </button>
                 <button
                   type="button"
-                  class="library-card-delete"
-                  class:library-card-delete--confirm={libraryDeleteConfirmId === essay.id}
+                  class="lib-essay-delete"
+                  class:lib-essay-delete--confirm={libraryDeleteConfirmId === essay.id}
                   aria-label={libraryDeleteConfirmId === essay.id ? 'Confirm delete' : 'Delete essay'}
                   onclick={() => handleLibraryDelete(essay.id)}
                   onblur={clearLibraryDeleteConfirm}
@@ -2595,6 +2629,18 @@
             {/each}
           </div>
         {/if}
+      {:else}
+        {#if libraryLogsLoading && libraryLogs.length === 0}
+          <div class="pub-empty">Loading your diary…</div>
+        {:else if libraryLogs.length === 0}
+          <div class="pub-empty">
+            <div class="pub-empty-title">No reading logs yet.</div>
+            <div class="pub-empty-hint">Log a book from the Books tab.</div>
+          </div>
+        {:else}
+          <ReadingLogDiary logs={libraryLogs} />
+        {/if}
+      {/if}
     </div>
   {:else}
     <div
