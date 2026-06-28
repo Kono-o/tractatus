@@ -51,7 +51,7 @@
   import { marked } from 'marked';
   import { fade } from 'svelte/transition';
   import { db, type ReadingLog, type ReadingLogWithAuthor } from '$lib/db';
-  import { X, Star, BookMarked, Plus, Heart } from '@lucide/svelte';
+  import { X, Star, BookMarked, Plus, Heart, Trash2 } from '@lucide/svelte';
   import CalendarPopover from './CalendarPopover.svelte';
   import GeneratedAvatar from './GeneratedAvatar.svelte';
   import { readingList as sharedList, addToReadingList as sharedAdd, removeFromReadingList as sharedRemove } from '$lib/reading-list.svelte';
@@ -83,11 +83,17 @@
     onselect,
     searchExpanded = false,
     onaddbook,
+    initialPublicLogs,
+    currentUserId = null,
+    onDelete,
   }: {
     searchQuery?: string;
     onselect?: () => void;
     searchExpanded?: boolean;
     onaddbook?: () => void;
+    initialPublicLogs?: ReadingLogWithAuthor[];
+    currentUserId?: string | null;
+    onDelete?: (logId: string) => void;
   } = $props();
 
   // ── Carousel collapse ──
@@ -193,9 +199,10 @@
   let touchStartX = 0;
   let touchStartScroll = 0;
   let trackScrolled = $state(false);
-  let publicReadingLogs: ReadingLogWithAuthor[] = $state([]);
-  let publicReadingLogsLoaded = $state(false);
+  let publicReadingLogs: ReadingLogWithAuthor[] = $state(initialPublicLogs ?? []);
+  let publicReadingLogsLoaded = $state(initialPublicLogs !== undefined);
   let viewedPublicReview: ReadingLogWithAuthor | null = $state<ReadingLogWithAuthor | null>(null);
+  let pendingReviewRestore: ReadingLogWithAuthor | null = $state<ReadingLogWithAuthor | null>(null);
   let publicLogsRefreshTimer: ReturnType<typeof setInterval> | undefined = $state();
 
   function refreshPublicReadingLogs() {
@@ -549,6 +556,27 @@
   });
 
   function clearSelection() {
+    if (pendingReviewRestore) {
+      viewedPublicReview = pendingReviewRestore;
+      pendingReviewRestore = null;
+      return;
+    }
+    selectedBook = null;
+    bookYear = null;
+    bookSelected = false;
+    bookDetails = null;
+    bookDetailsLoading = false;
+    showCoverLightbox = false;
+    editingLog = null;
+    rereviewed = false;
+    if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+  }
+
+  function closeBookInfo() {
+    if (pendingReviewRestore) {
+      viewedPublicReview = pendingReviewRestore;
+      pendingReviewRestore = null;
+    }
     selectedBook = null;
     bookYear = null;
     bookSelected = false;
@@ -794,7 +822,7 @@
   </div>
 
   {#if sharedList.items.length > 0 || !searchQuery}
-    <div class="rl-section">
+    <div class="rl-section" class:rl-section--collapsed={carouselCollapsed}>
       <div class="rl-header">
         <div class="rl-header-left">
           <button type="button" class="rl-title-btn" onclick={() => carouselCollapsed = !carouselCollapsed}>
@@ -872,14 +900,14 @@
                       <span class="pf-card-stars">
                         {#each [1,2,3,4,5] as val}
                           {@const half = Math.round(log.rating! * 2)}
-                          <svg class="pf-card-star" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <svg class="pf-card-star" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--hint)">
                             {#if val * 2 <= half}
-                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#f59e0b" />
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="#f59e0b" fill="#f59e0b" />
                             {:else if val * 2 - 1 === half}
-                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="#f59e0b" />
                               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" clip-path="inset(0 50% 0 0)" fill="#f59e0b" />
                             {:else}
-                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="none" />
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="currentColor" fill="none" />
                             {/if}
                           </svg>
                         {/each}
@@ -891,7 +919,7 @@
                       </span>
                     {/if}
                     {#if log.reread}
-                      <span class="pf-card-reread"><svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>
+                      <span class="pf-card-reread"><svg style="width:9px;height:9px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>
                     {/if}
                   </div>
                 {/if}
@@ -913,10 +941,21 @@
             <div class="pf-card-body" style="height: {PF_CARD_HEIGHT}px">
               <span class="pf-skel pf-skel--cover" style="width:{PF_COVER_W}px;height:{PF_COVER_H}px"></span>
               <div class="pf-card-info">
-                <span class="pf-skel pf-skel--line pf-skel--w60" style="height:14px"></span>
-                <span class="pf-skel pf-skel--line pf-skel--w80" style="margin-top:4px"></span>
-                <span class="pf-skel pf-skel--line pf-skel--w40"></span>
-                <span class="pf-skel pf-skel--line pf-skel--w90"></span>
+                <div class="pf-card-meta">
+                  <div class="pf-card-meta-left">
+                    <span class="pf-skel pf-skel--avatar"></span>
+                    <span class="pf-skel pf-skel--line pf-skel--w20" style="height:12px"></span>
+                    <span class="pf-skel pf-skel--sep"></span>
+                    <span class="pf-skel pf-skel--line pf-skel--w16" style="height:12px"></span>
+                  </div>
+                </div>
+                <span class="pf-skel pf-skel--line pf-skel--w85" style="height:16px"></span>
+                <span class="pf-skel pf-skel--line pf-skel--w50" style="height:13px;margin-top:2px"></span>
+                <div class="pf-card-reactions" style="margin-top:4px">
+                  <span class="pf-skel pf-skel--line pf-skel--w25" style="height:13px"></span>
+                </div>
+                <span class="pf-skel pf-skel--line pf-skel--w95" style="height:12px;margin-top:2px"></span>
+                <span class="pf-skel pf-skel--line pf-skel--w70" style="height:12px"></span>
               </div>
             </div>
           </div>
@@ -926,11 +965,11 @@
   {/if}
 
   {#if selectedBook}
-    <div class="overlay" transition:fade={{ duration: 150 }} onclick={clearSelection} role="dialog" aria-modal="true" aria-label="Book details">
+    <div class="overlay" transition:fade={{ duration: 150 }} onclick={closeBookInfo} role="dialog" aria-modal="true" aria-label="Book details">
       <div class="overlay-bg"></div>
       <div class="overlay-content" onclick={(e) => e.stopPropagation()}>
 
-        <button type="button" class="book-close book-close--top" onclick={clearSelection} aria-label="Close"><X class="size-5" /></button>
+        <button type="button" class="book-close book-close--top" onclick={closeBookInfo} aria-label="Close"><X class="size-5" /></button>
         <div class="book-body">
           {#if selectedBook.coverUrl}
             <img src={selectedBook.coverUrl} alt="" class="book-cover" role="button" tabindex="0" onclick={() => showCoverLightbox = true} onkeydown={(e) => { if (e.key === 'Enter') showCoverLightbox = true; }} />
@@ -1096,63 +1135,69 @@
   {#if viewedPublicReview}
     <div class="overlay" transition:fade={{ duration: 150 }} onclick={clearReviewDetail} role="dialog" aria-modal="true" aria-label="Review detail">
       <div class="overlay-bg"></div>
-      <div class="overlay-content" onclick={(e) => e.stopPropagation()}>
+      <div class="overlay-content overlay-content--review" onclick={(e) => e.stopPropagation()}>
         <button type="button" class="book-close book-close--top" onclick={clearReviewDetail} aria-label="Close"><X class="size-5" /></button>
-        <div class="rv-detail">
-          <div class="rv-detail-header">
-            <span class="rv-detail-avatar">
-              <GeneratedAvatar userId={viewedPublicReview.user_id} seed={viewedPublicReview.author_avatar_seed} avatarUrl={viewedPublicReview.author_avatar_url} size={20} rounded={20} />
+        <div class="rv-wrap">
+          <div class="rv-head">
+            <span class="rv-head-avatar">
+              <GeneratedAvatar userId={viewedPublicReview.user_id} seed={viewedPublicReview.author_avatar_seed} avatarUrl={viewedPublicReview.author_avatar_url} size={18} rounded={18} />
             </span>
-            <div class="rv-detail-byline">
-              <span class="rv-detail-username">{viewedPublicReview.author_username || 'Anonymous'}</span>
-              <span class="rv-detail-date">{formatLogDate(viewedPublicReview.created_at)}</span>
+            <span class="rv-head-name">{viewedPublicReview.author_username || 'Anonymous'}</span>
+            <span class="rv-head-sep">·</span>
+            <span class="rv-head-date">{formatLogDate(viewedPublicReview.created_at)}</span>
+          </div>
+          <div class="rv-book" role="button" tabindex="0" onclick={() => { const l = viewedPublicReview; if (l) { pendingReviewRestore = l; clearReviewDetail(); selectBook({ id: l.book_id, title: l.title, author: l.author, coverUrl: l.cover_url, year: null, editions: null, publisher: null }); }}} onkeydown={(e) => { if (e.key === 'Enter') { const l = viewedPublicReview; if (l) { pendingReviewRestore = l; clearReviewDetail(); selectBook({ id: l.book_id, title: l.title, author: l.author, coverUrl: l.cover_url, year: null, editions: null, publisher: null }); }}}}>
+            <div class="rv-cover-wrap">
+              {#if viewedPublicReview.cover_url}
+                <img src={viewedPublicReview.cover_url} alt="" class="rv-cover" loading="lazy" />
+              {:else}
+                <div class="rv-cover rv-cover--empty"><BookMarked class="size-6" aria-hidden="true" /></div>
+              {/if}
+            </div>
+            <div class="rv-book-info">
+              <div class="rv-book-title">{viewedPublicReview.title || 'Untitled'}</div>
+              <div class="rv-book-author">{viewedPublicReview.author || 'Unknown'}</div>
             </div>
           </div>
-          <div class="rv-detail-book">
-            {#if viewedPublicReview.cover_url}
-              <img src={viewedPublicReview.cover_url} alt="" class="rv-detail-cover" loading="lazy" />
-            {:else}
-              <div class="rv-detail-cover rv-detail-cover--empty"><BookMarked class="size-5" aria-hidden="true" /></div>
+          <div class="rv-body">
+            {#if viewedPublicReview.rating || viewedPublicReview.liked !== null || viewedPublicReview.reread}
+              <div class="rv-reactions">
+                {#if viewedPublicReview.rating}
+                  <span class="rv-stars">
+                    {#each [1,2,3,4,5] as val}
+                      {@const half = Math.round(viewedPublicReview.rating! * 2)}
+                      <svg class="rv-star" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--hint)">
+                        {#if val * 2 <= half}
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="#f59e0b" fill="#f59e0b" />
+                        {:else if val * 2 - 1 === half}
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="#f59e0b" />
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" clip-path="inset(0 50% 0 0)" fill="#f59e0b" />
+                        {:else}
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="currentColor" fill="none" />
+                        {/if}
+                      </svg>
+                    {/each}
+                  </span>
+                {/if}
+                {#if viewedPublicReview.liked !== null}
+                  <span class="rv-liked" class:rv-liked--yes={viewedPublicReview.liked === true} class:rv-liked--no={viewedPublicReview.liked === false}>
+                    <Heart class="size-4" fill={viewedPublicReview.liked === true ? '#ef4444' : 'none'} aria-hidden="true" />
+                  </span>
+                {/if}
+                {#if viewedPublicReview.reread}
+                  <span class="rv-reread"><svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>
+                {/if}
+                {#if currentUserId && viewedPublicReview.user_id === currentUserId}
+                  <button type="button" class="rv-delete-btn" onclick={() => { const id = viewedPublicReview!.id; viewedPublicReview = null; onDelete?.(id); }} aria-label="Delete log"><Trash2 class="size-4" aria-hidden="true" /></button>
+                {/if}
+              </div>
             {/if}
-            <div class="rv-detail-book-info">
-              <div class="rv-detail-book-title">{viewedPublicReview.title || 'Untitled'}</div>
-              <div class="rv-detail-book-author">{viewedPublicReview.author || 'Unknown'}</div>
-            </div>
+            {#if viewedPublicReview.review}
+              <div class="rv-text">{viewedPublicReview.review}</div>
+            {:else}
+              <div class="rv-text rv-text--empty">No written review.</div>
+            {/if}
           </div>
-          {#if viewedPublicReview.rating || viewedPublicReview.liked !== null || viewedPublicReview.reread}
-            <div class="rv-detail-reactions">
-              {#if viewedPublicReview.rating}
-                <span class="rv-detail-stars">
-                  {#each [1,2,3,4,5] as val}
-                    {@const half = Math.round(viewedPublicReview.rating! * 2)}
-                    <svg class="rv-detail-star" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      {#if val * 2 <= half}
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#f59e0b" />
-                      {:else if val * 2 - 1 === half}
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" clip-path="inset(0 50% 0 0)" fill="#f59e0b" />
-                      {:else}
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="none" />
-                      {/if}
-                    </svg>
-                  {/each}
-                </span>
-              {/if}
-              {#if viewedPublicReview.liked !== null}
-                <span class="rv-detail-liked" class:rv-detail-liked--yes={viewedPublicReview.liked === true} class:rv-detail-liked--no={viewedPublicReview.liked === false}>
-                  <Heart class="size-4" fill={viewedPublicReview.liked === true ? '#ef4444' : 'none'} aria-hidden="true" />
-                </span>
-              {/if}
-              {#if viewedPublicReview.reread}
-                <span class="rv-detail-reread"><svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>
-              {/if}
-            </div>
-          {/if}
-          {#if viewedPublicReview.review}
-            <div class="rv-detail-text">{viewedPublicReview.review}</div>
-          {:else}
-            <div class="rv-detail-text rv-detail-text--empty">No written review.</div>
-          {/if}
         </div>
       </div>
     </div>
@@ -1164,6 +1209,7 @@
 
   /* ───── Reading List Carousel ───── */
   .rl-section { }
+  .rl-section--collapsed { margin-bottom: -0.75rem; }
   .rl-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; padding-left: 0.25rem; }
   .rl-header-left { display: flex; align-items: baseline; gap: 0.5rem; }
   .rl-title-btn { all: unset; cursor: pointer; display: flex; align-items: center; gap: 6px; }
@@ -1192,12 +1238,13 @@
   .rl-empty { font-size: 12px; color: var(--hint); padding: 0.5rem 0; }
 
   /* ───── Public Feed ───── */
-  .pf-sep { height: 1px; background: var(--feed-rule, var(--border)); margin: 0.375rem 0; }
-  .pf-section { }
+  .pf-sep { height: 1px; background: var(--feed-rule, var(--border)); margin: 0 -0.75rem; }
+  .pf-section { margin-top: -0.75rem; }
   .pf-list { display: flex; flex-direction: column; }
-  .pf-card { padding: 1rem 0; border-bottom: 0.5px solid var(--feed-rule, var(--border)); transition: background 150ms ease; cursor: pointer; }
+  .pf-card { padding: 1rem 0.75rem; border-bottom: 0.5px solid var(--feed-rule, var(--border)); transition: background 150ms ease; cursor: pointer; margin-left: calc(-0.75rem); margin-right: calc(-0.75rem); }
+  .pf-card:first-child { padding-top: 0.75rem; }
   .pf-card:last-child { border-bottom: none; }
-  .pf-card:last-child::after { content: ''; display: block; height: 1px; background: var(--feed-rule, var(--border)); margin-top: 1rem; width: 100%; }
+  .pf-card:last-child::after { content: ''; display: block; height: 1px; background: var(--feed-rule, var(--border)); margin-top: 1rem; margin-left: calc(-0.75rem); margin-right: calc(-0.75rem); }
   .pf-card:hover { background: color-mix(in srgb, var(--surf) 50%, transparent); }
   .pf-card-body { display: flex; gap: 14px; overflow: hidden; }
   .pf-card-cover { object-fit: contain; border-radius: 6px; flex-shrink: 0; background: var(--surf); }
@@ -1217,16 +1264,25 @@
   .pf-card-liked { display: inline-flex; align-items: center; margin-left: 5px; line-height: 1; }
   .pf-card-liked--yes { color: #ef4444; }
   .pf-card-liked--no { color: var(--hint); opacity: 0.5; }
-  .pf-card-reread { display: inline-flex; align-items: center; color: var(--hint); margin-left: 5px; }
+  .pf-card-reread { display: inline-flex; align-items: center; justify-content: center; color: var(--hint); margin-left: 5px; }
   .pf-card-review { font-family: var(--ss); font-size: 13px; line-height: 1.55; color: var(--text-muted); overflow: hidden; max-height: 4em; mask-image: linear-gradient(to bottom, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); margin-top: 4px; }
   .pf-card--skel { pointer-events: none; }
   .pf-skel { display: block; background: linear-gradient(90deg, var(--surf) 25%, var(--border) 50%, var(--surf) 75%); background-size: 200px 100%; animation: shimmer 1.5s ease-in-out infinite; border-radius: 4px; }
   .pf-skel--cover { border-radius: 6px; flex-shrink: 0; background: var(--surf); }
+  .pf-skel--avatar { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; }
+  .pf-skel--sep { width: 3px; height: 3px; border-radius: 50%; flex-shrink: 0; }
   .pf-skel--line { height: 12px; }
-  .pf-skel--w60 { width: 60%; }
+  .pf-skel--w16 { width: 16%; }
+  .pf-skel--w20 { width: 20%; }
+  .pf-skel--w25 { width: 25%; }
   .pf-skel--w40 { width: 40%; }
+  .pf-skel--w50 { width: 50%; }
+  .pf-skel--w60 { width: 60%; }
+  .pf-skel--w70 { width: 70%; }
   .pf-skel--w80 { width: 80%; }
+  .pf-skel--w85 { width: 85%; }
   .pf-skel--w90 { width: 90%; }
+  .pf-skel--w95 { width: 95%; }
 
   /* ───── Search Box ───── */
   .search-box { border: 1px solid var(--border); border-radius: 6px; }
@@ -1373,25 +1429,32 @@
   @keyframes pop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
 
   /* ───── Review Detail Overlay ───── */
-  .rv-detail { display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; flex: 1; }
-  .rv-detail-header { display: flex; align-items: center; gap: 8px; }
-  .rv-detail-avatar { flex-shrink: 0; display: flex; }
-  .rv-detail-byline { display: flex; flex-direction: column; gap: 1px; }
-  .rv-detail-username { font-weight: 600; font-size: 13px; color: var(--ink); }
-  .rv-detail-date { font-size: 11px; color: var(--hint); }
-  .rv-detail-book { display: flex; gap: 10px; padding: 10px; background: var(--surf); border-radius: 8px; align-items: center; }
-  .rv-detail-cover { width: 44px; height: 66px; object-fit: contain; border-radius: 4px; flex-shrink: 0; background: var(--surf); }
-  .rv-detail-cover--empty { display: flex; align-items: center; justify-content: center; background: var(--surf); color: var(--hint); }
-  .rv-detail-book-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .rv-detail-book-title { font-weight: 600; font-size: 14px; color: var(--ink); white-space: normal; overflow: visible; }
-  .rv-detail-book-author { font-size: 12px; color: var(--text-muted); }
-  .rv-detail-reactions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
-  .rv-detail-stars { display: flex; gap: 3px; }
-  .rv-detail-star { display: block; }
-  .rv-detail-liked { display: inline-flex; align-items: center; gap: 5px; margin-left: 6px; color: var(--hint); }
-  .rv-detail-liked--yes { color: #ef4444; }
-  .rv-detail-liked--no { color: var(--hint); opacity: 0.6; }
-  .rv-detail-reread { display: inline-flex; align-items: center; color: var(--hint); margin-left: 5px; }
-  .rv-detail-text { font-size: 14px; line-height: 1.65; color: var(--text); white-space: pre-wrap; word-break: break-word; }
-  .rv-detail-text--empty { color: var(--hint); font-style: italic; }
+  .overlay-content--review { height: auto; max-height: 520px; min-height: 0; padding: 1.25rem 1.5rem 1.5rem; }
+  .rv-wrap { display: flex; flex-direction: column; gap: 0.875rem; overflow-y: auto; flex: 1; min-height: 0; }
+  .rv-head { display: flex; align-items: center; gap: 5px; font-family: var(--ui); font-size: 0.72rem; color: var(--hint); flex-shrink: 0; }
+  .rv-head-avatar { flex-shrink: 0; display: flex; }
+  .rv-head-name { font-weight: 600; color: var(--text-muted); }
+  .rv-head-sep { color: var(--border); }
+  .rv-head-date { color: var(--hint); }
+  .rv-book { display: flex; gap: 0.75rem; padding: 0.75rem; background: var(--surf); border-radius: 10px; align-items: center; cursor: pointer; transition: background 0.15s ease, box-shadow 0.15s ease; outline: none; flex-shrink: 0; }
+  .rv-book:hover { background: color-mix(in srgb, var(--accent) 4%, var(--surf)); box-shadow: 0 0 0 0.5px var(--border); }
+  .rv-book:focus-visible { box-shadow: 0 0 0 1.5px var(--ink); }
+  .rv-cover-wrap { flex-shrink: 0; }
+  .rv-cover { width: 56px; height: 84px; object-fit: cover; border-radius: 5px; flex-shrink: 0; background: var(--surf); box-shadow: 0 1px 4px rgba(0,0,0,0.12); display: block; }
+  .rv-cover--empty { display: flex; align-items: center; justify-content: center; background: var(--surf); color: var(--hint); box-shadow: none; }
+  .rv-book-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .rv-book-title { font-weight: 700; font-size: 0.9rem; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rv-book-author { font-size: 0.75rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rv-body { display: flex; flex-direction: column; gap: 0.625rem; }
+  .rv-reactions { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+  .rv-stars { display: flex; gap: 2px; }
+  .rv-star { display: block; }
+  .rv-liked { display: inline-flex; align-items: center; margin-left: 4px; }
+  .rv-liked--yes { color: #ef4444; }
+  .rv-liked--no { color: var(--hint); opacity: 0.5; }
+  .rv-reread { display: inline-flex; align-items: center; margin-left: 4px; color: var(--hint); }
+  .rv-delete-btn { margin-left: auto; background: none; border: none; cursor: pointer; color: #ef4444; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 0; transition: opacity 0.15s; }
+  .rv-delete-btn:hover { opacity: 0.7; }
+  .rv-text { font-size: 0.82rem; line-height: 1.7; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .rv-text--empty { color: var(--hint); font-style: italic; font-size: 0.78rem; }
 </style>

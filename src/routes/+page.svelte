@@ -2,6 +2,8 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { fly, fade } from 'svelte/transition';
   import { goto } from '$app/navigation';
+  import type { PageData } from './$types';
+  let { data }: { data: PageData } = $props();
   import GeneratedAvatar from '$lib/components/GeneratedAvatar.svelte';
   import {
     db,
@@ -380,7 +382,6 @@
   });
 
   let libraryDeleteConfirmId = $state<string | null>(null);
-  let libraryLogDeleteConfirmId = $state<string | null>(null);
   let libraryTab = $state<'essays' | 'diary'>('essays');
   let libraryLogs = $state<ReadingLog[]>([]);
   let libraryLogsLoading = $state(false);
@@ -405,19 +406,6 @@
     } catch (e) {
       console.error('[library] delete failed', e);
     }
-  }
-
-  function handleLibraryLogDelete(logId: string) {
-    if (libraryLogDeleteConfirmId === logId) {
-      libraryLogDeleteConfirmId = null;
-      void performLibraryLogDelete(logId);
-    } else {
-      libraryLogDeleteConfirmId = logId;
-    }
-  }
-
-  function clearLibraryLogDeleteConfirm() {
-    libraryLogDeleteConfirmId = null;
   }
 
   async function performLibraryLogDelete(logId: string) {
@@ -2554,7 +2542,7 @@
   {#if viewMode === 'diary'}
     <div class="pub-scroll no-scrollbar">
       {#if currentUser}
-        <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} onaddbook={toggleSearch} />
+        <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} onaddbook={toggleSearch} initialPublicLogs={data.publicReadingLogs} currentUserId={currentUser?.id} onDelete={performLibraryLogDelete} />
       {:else}
         <div class="pub-empty">
           <div class="pub-empty-title">Books</div>
@@ -2663,9 +2651,7 @@
         {:else}
           <ReadingLogDiary
             logs={libraryLogs}
-            onDelete={handleLibraryLogDelete}
-            deleteConfirmId={libraryLogDeleteConfirmId}
-            onBlurDelete={clearLibraryLogDeleteConfirm}
+            onDelete={performLibraryLogDelete}
           />
         {/if}
       {/if}
