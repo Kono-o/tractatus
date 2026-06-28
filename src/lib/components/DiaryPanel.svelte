@@ -50,7 +50,7 @@
 <script lang="ts">
   import { marked } from 'marked';
   import { fade } from 'svelte/transition';
-  import { db, type ReadingLog, type ReadingLogWithAuthor } from '$lib/db';
+  import { db, supabase, type ReadingLog, type ReadingLogWithAuthor } from '$lib/db';
   import { X, Star, BookMarked, Plus, Heart, Trash2 } from '@lucide/svelte';
   import CalendarPopover from './CalendarPopover.svelte';
   import GeneratedAvatar from './GeneratedAvatar.svelte';
@@ -98,6 +98,12 @@
 
   // ── Carousel collapse ──
   let carouselCollapsed = $state(false);
+
+  $effect(() => {
+    if (searchExpanded && carouselCollapsed) {
+      carouselCollapsed = false;
+    }
+  });
 
   // ── Search state ──
   let searchResults = $state<BookResult[]>([]);
@@ -203,13 +209,14 @@
   let publicReadingLogsLoaded = $state(initialPublicLogs !== undefined);
   let viewedPublicReview: ReadingLogWithAuthor | null = $state<ReadingLogWithAuthor | null>(null);
   let pendingReviewRestore: ReadingLogWithAuthor | null = $state<ReadingLogWithAuthor | null>(null);
-  let publicLogsRefreshTimer: ReturnType<typeof setInterval> | undefined = $state();
-
   function refreshPublicReadingLogs() {
     db.listPublicReadingLogs().then(logs => {
       publicReadingLogs = logs;
     }).catch(() => {});
   }
+
+  let logsChannel: ReturnType<typeof supabase.channel> | null = $state(null);
+  let logsFallbackTimer: ReturnType<typeof setInterval> | undefined = $state();
 
   $effect(() => {
     if (!publicReadingLogsLoaded) {
@@ -223,10 +230,27 @@
   });
 
   $effect(() => {
-    if (publicReadingLogsLoaded) {
-      publicLogsRefreshTimer = setInterval(refreshPublicReadingLogs, 30_000);
-      return () => { clearInterval(publicLogsRefreshTimer); };
-    }
+    if (!publicReadingLogsLoaded) return;
+
+    logsChannel = supabase.channel('public-logs-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'reading_logs' },
+        () => { refreshPublicReadingLogs(); },
+      )
+      .subscribe();
+
+    logsFallbackTimer = setInterval(refreshPublicReadingLogs, 300_000);
+
+    return () => {
+      if (logsChannel) {
+        supabase.removeChannel(logsChannel);
+        logsChannel = null;
+      }
+      if (logsFallbackTimer) {
+        clearInterval(logsFallbackTimer);
+        logsFallbackTimer = undefined;
+      }
+    };
   });
 
   function onTrackTouchStart(e: TouchEvent) {
@@ -526,6 +550,116 @@
     return marked.parse(text, { async: false }) as string;
   }
 
+  async function fetchBookByOlid(olid: string): Promise<BookResult | null> {
+    try {
+      const cleanId = olid.replace('/works/', '');
+      let title: string | null = null;
+      let author: string | null = null;
+      let coverUrl: string | null = null;
+      let year: number | null = null;
+      let editions: number | null = null;
+      let publisher: string | null = null;
+      let first_publish_year: number | null = null;
+      let isbn: string | null = null;
+      let pages: number | null = null;
+      let publish_date: string | null = null;
+
+      // Try works API for title, year, author
+      const wRes = await fetch(`https://openlibrary.org/works/${cleanId}.json`);
+      if (wRes.ok) {
+        const wData = await wRes.json();
+        title = wData.title ?? null;
+        first_publish_year = wData.first_publish_year ?? null;
+        if (!year) year = first_publish_year;
+        if (wData.authors?.[0]?.author?.key) {
+          try {
+            const aRes = await fetch(`https://openlibrary.org${wData.authors[0].author.key}.json`);
+            if (aRes.ok) {
+              const aData = await aRes.json();
+              author = aData.name ?? null;
+            }
+          } catch {}
+        }
+      }
+
+      // Try search API for cover, publisher, editions, isbn, pages
+      const sRes = await fetch(
+        `https://openlibrary.org/search.json?q=key:${cleanId}&limit=1&fields=key,title,author_name,cover_i,first_publish_year,edition_count,publisher,isbn,number_of_pages_median,publish_date`
+      );
+      if (sRes.ok) {
+        const sData = await sRes.json();
+        const doc = sData.docs?.[0];
+        if (doc) {
+          if (!title) title = doc.title ?? null;
+          if (!author) author = doc.author_name?.[0] ?? null;
+          coverUrl = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null;
+          if (!year) year = doc.first_publish_year ?? null;
+          editions = doc.edition_count ?? null;
+          publisher = doc.publisher?.[0] ?? null;
+          if (!first_publish_year) first_publish_year = doc.first_publish_year ?? null;
+          isbn = doc.isbn?.[0] ?? null;
+          pages = doc.number_of_pages_median ?? null;
+          publish_date = doc.publish_date?.[0] ?? null;
+        }
+      }
+
+      if (title === null && author === null && coverUrl === null && year === null) return null;
+
+      return {
+        id: olid,
+        title: title || 'Untitled',
+        author,
+        coverUrl,
+        year,
+        editions,
+        publisher,
+        first_publish_year,
+        isbn,
+        pages,
+        publish_date,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function openBookFromLog(log: ReadingLog | ReadingLogWithAuthor) {
+    selectedBook = { id: log.book_id, title: log.title || '', author: log.author, coverUrl: log.cover_url, year: null, editions: null, publisher: null, first_publish_year: null };
+    bookYear = null;
+    bookSelected = true;
+    editingLog = null;
+    bookDetails = null;
+    bookDetailsLoading = true;
+    rereviewed = false;
+    void loadBookDetails(log.book_id);
+
+    const matching = logs.filter(l => l.book_id === log.book_id).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    if (matching.length > 0) {
+      populateFormFromLog(matching[0]);
+    } else {
+      clearForm();
+    }
+
+    fetchBookByOlid(log.book_id).then(fullBook => {
+      if (fullBook) {
+        selectedBook = {
+          ...selectedBook,
+          ...(fullBook.title ? { title: fullBook.title } : {}),
+          ...(fullBook.author ? { author: fullBook.author } : {}),
+          ...(fullBook.coverUrl ? { coverUrl: fullBook.coverUrl } : {}),
+          year: fullBook.year ?? selectedBook.year,
+          ...(fullBook.publisher ? { publisher: fullBook.publisher } : {}),
+          first_publish_year: fullBook.first_publish_year ?? selectedBook.first_publish_year,
+          ...(fullBook.editions ? { editions: fullBook.editions } : {}),
+          ...(fullBook.isbn ? { isbn: fullBook.isbn } : {}),
+          ...(fullBook.pages ? { pages: fullBook.pages } : {}),
+          ...(fullBook.publish_date ? { publish_date: fullBook.publish_date } : {}),
+        };
+        if (fullBook.year) bookYear = fullBook.year;
+      }
+    });
+  }
+
   function selectBook(book: BookResult) {
     selectedBook = book;
     bookYear = book.year;
@@ -742,87 +876,8 @@
 </script>
 
 <div class="diary-panel">
-  <div class="search-box">
-    <div class="search-box-inner">
-      <div class="search-status" class:search-status--active={statusActive} class:search-status--error={searchPhase === 'error'}>
-        <span class="search-dot" class:search-dot--error={searchPhase === 'error'}></span>
-        <span class="search-label"><strong>OpenLibrary</strong> · {searchStatusSuffix}</span>
-      </div>
-
-      {#if searchPhase === 'error'}
-        <div class="search-retry" transition:fade>
-          <button type="button" class="search-retry-btn" onclick={() => void doSearch(searchQuery)}>Retry</button>
-        </div>
-      {/if}
-
-      <div class="search-results-wrap" class:search-results-wrap--open={searchHasContent}>
-        {#if searchLoading}
-          <div class="search-results-layer" transition:fade>
-            <div class="search-skeletons">
-              {#each [1,2,3,4,5] as _}
-                <div class="search-skel">
-                  <div class="search-skel-cover"></div>
-                  <div class="search-skel-lines">
-                    <div class="search-skel-line search-skel-line--t"></div>
-                    <div class="search-skel-line search-skel-line--a"></div>
-                  </div>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
-        {#if !searchLoading && searchResults.length > 0}
-          <div class="search-results-layer" transition:fade>
-            <div class="search-results" role="listbox" aria-label="Search results">
-          {#each searchResults as book, i}
-            <button
-              type="button"
-              role="option"
-              aria-selected={selectedIndex === i}
-              class="search-result"
-              class:search-result--sel={selectedIndex === i}
-              data-search-index={i}
-              onclick={() => selectBook(book)}
-              onmouseenter={() => { selectedIndex = i; }}
-            >
-              {#if book.coverUrl}
-                <div class="search-result-cover-wrap">
-                  <div class="search-result-cover-skel"></div>
-                  <img src={book.coverUrl} alt="" class="search-result-cover" loading="lazy" onload={(e) => { const el = e.target as HTMLElement; el.style.opacity = '1'; (el.previousElementSibling as HTMLElement).style.display = 'none'; }} onerror={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
-                </div>
-              {:else}
-                <div class="search-result-cover search-result-cover--empty">
-                  <BookMarked class="size-5" aria-hidden="true" />
-                </div>
-              {/if}
-              <div class="search-result-info">
-                <div class="search-result-title">{@html highlightMatch(book.title, searchQuery)}</div>
-                {#if book.author}
-                  <div class="search-result-author">{#if book.year}{book.year}<span class="sep-dot"></span>{/if}{@html highlightMatch(book.author, searchQuery)}</div>
-                {/if}
-                <div class="search-result-meta">
-                  {#if book.publisher}{book.publisher}{/if}
-                  {#if book.editions}{#if book.publisher}<span class="sep-dot"></span>{/if}{book.editions} ed.{/if}
-                </div>
-              </div>
-            </button>
-          {/each}
-          <div bind:this={sentinelEl} class="search-sentinel">
-            {#if loadingMore}
-              <span class="search-spinner"></span>
-            {:else if hasMore}
-              <button type="button" class="search-more-btn" onclick={loadMore}>Load more</button>
-            {/if}
-          </div>
-            </div>
-          </div>
-        {/if}
-      </div>
-    </div>
-  </div>
-
-  {#if sharedList.items.length > 0 || !searchQuery}
     <div class="rl-section" class:rl-section--collapsed={carouselCollapsed}>
+    {#if sharedList.items.length > 0 || !searchQuery}
       <div class="rl-header">
         <div class="rl-header-left">
           <button type="button" class="rl-title-btn" onclick={() => carouselCollapsed = !carouselCollapsed}>
@@ -833,6 +888,85 @@
         </div>
       </div>
       <div class="rl-track-collapse" class:rl-track-collapse--open={!carouselCollapsed}>
+      <div class="rl-collapse-inner">
+      <div class="search-box">
+        <div class="search-box-inner">
+          <div class="search-status" class:search-status--active={statusActive} class:search-status--error={searchPhase === 'error'}>
+            <span class="search-dot" class:search-dot--error={searchPhase === 'error'}></span>
+            <span class="search-label"><strong>OpenLibrary</strong> · {searchStatusSuffix}</span>
+          </div>
+
+          {#if searchPhase === 'error'}
+            <div class="search-retry" transition:fade>
+              <button type="button" class="search-retry-btn" onclick={() => void doSearch(searchQuery)}>Retry</button>
+            </div>
+          {/if}
+
+          <div class="search-results-wrap" class:search-results-wrap--open={searchHasContent}>
+            {#if searchLoading}
+              <div class="search-results-layer" transition:fade>
+                <div class="search-skeletons">
+                  {#each [1,2,3,4,5] as _}
+                    <div class="search-skel">
+                      <div class="search-skel-cover"></div>
+                      <div class="search-skel-lines">
+                        <div class="search-skel-line search-skel-line--t"></div>
+                        <div class="search-skel-line search-skel-line--a"></div>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if !searchLoading && searchResults.length > 0}
+              <div class="search-results-layer" transition:fade>
+                <div class="search-results" role="listbox" aria-label="Search results">
+              {#each searchResults as book, i}
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selectedIndex === i}
+                  class="search-result"
+                  class:search-result--sel={selectedIndex === i}
+                  data-search-index={i}
+                  onclick={() => selectBook(book)}
+                  onmouseenter={() => { selectedIndex = i; }}
+                >
+                  {#if book.coverUrl}
+                    <div class="search-result-cover-wrap">
+                      <div class="search-result-cover-skel"></div>
+                      <img src={book.coverUrl} alt="" class="search-result-cover" loading="lazy" onload={(e) => { const el = e.target as HTMLElement; el.style.opacity = '1'; (el.previousElementSibling as HTMLElement).style.display = 'none'; }} onerror={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+                    </div>
+                  {:else}
+                    <div class="search-result-cover search-result-cover--empty">
+                      <BookMarked class="size-5" aria-hidden="true" />
+                    </div>
+                  {/if}
+                  <div class="search-result-info">
+                    <div class="search-result-title">{@html highlightMatch(book.title, searchQuery)}</div>
+                    {#if book.author}
+                      <div class="search-result-author">{#if book.year}{book.year}<span class="sep-dot"></span>{/if}{@html highlightMatch(book.author, searchQuery)}</div>
+                    {/if}
+                    <div class="search-result-meta">
+                      {#if book.publisher}{book.publisher}{/if}
+                      {#if book.editions}{#if book.publisher}<span class="sep-dot"></span>{/if}{book.editions} ed.{/if}
+                    </div>
+                  </div>
+                </button>
+              {/each}
+              <div bind:this={sentinelEl} class="search-sentinel">
+                {#if loadingMore}
+                  <span class="search-spinner"></span>
+                {:else if hasMore}
+                  <button type="button" class="search-more-btn" onclick={loadMore}>Load more</button>
+                {/if}
+              </div>
+                </div>
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
       <div class="rl-track-wrap" class:rl-track-wrap--scrolled={trackScrolled} onwheel={onTrackWheel}>
         <div bind:this={readingListTrack} class="rl-track" ontouchstart={onTrackTouchStart} ontouchmove={onTrackTouchMove} onscroll={onTrackScroll}>
           {#each sharedList.items as item (item.id)}
@@ -864,8 +998,9 @@
         </div>
       </div>
       </div>
-    </div>
+      </div>
   {/if}
+    </div>
 
   {#if publicReadingLogsLoaded && publicReadingLogs.length > 0}
     <div class="pf-sep"></div>
@@ -875,9 +1010,9 @@
           <div class="pf-card" role="button" tabindex="0" onclick={() => viewReviewDetail(log)} onkeydown={(e) => { if (e.key === 'Enter') viewReviewDetail(log); }}>
             <div class="pf-card-body" style="height: {PF_CARD_HEIGHT}px">
               {#if log.cover_url}
-                <img src={log.cover_url} alt="" class="pf-card-cover" loading="lazy" style="width:{PF_COVER_W}px;height:{PF_COVER_H}px;cursor:pointer" onclick={(e) => { e.stopPropagation(); selectBook({ id: log.book_id, title: log.title, author: log.author, coverUrl: log.cover_url, year: null, editions: null, publisher: null }); }} />
+                <img src={log.cover_url} alt="" class="pf-card-cover" loading="lazy" style="width:{PF_COVER_W}px;height:{PF_COVER_H}px;cursor:pointer" onclick={(e) => { e.stopPropagation(); openBookFromLog(log); }} />
               {:else}
-                <div class="pf-card-cover pf-card-cover--empty" style="width:{PF_COVER_W}px;height:{PF_COVER_H}px;cursor:pointer" onclick={(e) => { e.stopPropagation(); selectBook({ id: log.book_id, title: log.title, author: log.author, coverUrl: log.cover_url, year: null, editions: null, publisher: null }); }}>
+                <div class="pf-card-cover pf-card-cover--empty" style="width:{PF_COVER_W}px;height:{PF_COVER_H}px;cursor:pointer" onclick={(e) => { e.stopPropagation(); openBookFromLog(log); }}>
                   <BookMarked class="size-4" aria-hidden="true" />
                 </div>
               {/if}
@@ -1146,7 +1281,7 @@
             <span class="rv-head-sep">·</span>
             <span class="rv-head-date">{formatLogDate(viewedPublicReview.created_at)}</span>
           </div>
-          <div class="rv-book" role="button" tabindex="0" onclick={() => { const l = viewedPublicReview; if (l) { pendingReviewRestore = l; clearReviewDetail(); selectBook({ id: l.book_id, title: l.title, author: l.author, coverUrl: l.cover_url, year: null, editions: null, publisher: null }); }}} onkeydown={(e) => { if (e.key === 'Enter') { const l = viewedPublicReview; if (l) { pendingReviewRestore = l; clearReviewDetail(); selectBook({ id: l.book_id, title: l.title, author: l.author, coverUrl: l.cover_url, year: null, editions: null, publisher: null }); }}}}>
+          <div class="rv-book" role="button" tabindex="0" onclick={() => { const l = viewedPublicReview; if (l) { pendingReviewRestore = l; clearReviewDetail(); openBookFromLog(l); }}} onkeydown={(e) => { if (e.key === 'Enter') { const l = viewedPublicReview; if (l) { pendingReviewRestore = l; clearReviewDetail(); openBookFromLog(l); }}}}>
             <div class="rv-cover-wrap">
               {#if viewedPublicReview.cover_url}
                 <img src={viewedPublicReview.cover_url} alt="" class="rv-cover" loading="lazy" />
@@ -1208,9 +1343,9 @@
   .diary-panel { padding: 0.75rem; display: flex; flex-direction: column; gap: 0.75rem; }
 
   /* ───── Reading List Carousel ───── */
-  .rl-section { }
+  .rl-section { display: flex; flex-direction: column; gap: 0.5rem; }
   .rl-section--collapsed { margin-bottom: -0.75rem; }
-  .rl-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; padding-left: 0.25rem; }
+  .rl-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; padding-left: 0.25rem; }
   .rl-header-left { display: flex; align-items: baseline; gap: 0.5rem; }
   .rl-title-btn { all: unset; cursor: pointer; display: flex; align-items: center; gap: 6px; }
   .rl-title-btn:hover .rl-title { color: var(--ink); }
@@ -1219,7 +1354,7 @@
   .rl-title { font-family: 'Inter', sans-serif; font-size: 0.7rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--hint); margin: 0; transition: color 0.1s; }
   .rl-track-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 0.2s ease, opacity 0.15s ease; }
   .rl-track-collapse--open { grid-template-rows: 1fr; opacity: 1; }
-  .rl-track-collapse > .rl-track-wrap { min-height: 0; overflow: hidden; }
+  .rl-collapse-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 0.5rem; }
   .rl-count { font-family: 'Inter', sans-serif; font-size: 0.65rem; color: var(--hint); opacity: 0.5; }
   .rl-track-wrap { position: relative; overflow: hidden; -webkit-mask: linear-gradient(90deg, #000 calc(100% - 48px), transparent); mask: linear-gradient(90deg, #000 calc(100% - 48px), transparent); }
   .rl-track-wrap--scrolled { -webkit-mask: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 48px), transparent 100%); mask: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 48px), transparent 100%); }
@@ -1256,7 +1391,7 @@
   .pf-card-byline { font-size: 12px; font-weight: 500; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 8rem; }
   .pf-card-sep { color: var(--border); user-select: none; }
   .pf-card-date { white-space: nowrap; }
-  .pf-card-book-title { font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--ink); white-space: normal; overflow: visible; word-break: break-word; }
+  .pf-card-book-title { font-family: var(--dm); font-size: 15px; font-weight: 700; line-height: 1.35; color: var(--ink); white-space: normal; overflow: visible; word-break: break-word; letter-spacing: 0.02em; }
   .pf-card-book-author { font-size: 12px; color: var(--text-muted); }
   .pf-card-reactions { display: flex; align-items: center; gap: 2px; margin-top: 4px; flex-wrap: wrap; }
   .pf-card-stars { display: flex; gap: 2px; }
@@ -1346,6 +1481,7 @@
 
   /* Book body — cover + info */
   .book-body { display: flex; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+
   .book-cover { width: 88px; height: 132px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: box-shadow 0.15s; }
   .book-cover:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
   .book-cover--empty { display: flex; align-items: center; justify-content: center; background: var(--surf); color: var(--hint); box-shadow: none; }
@@ -1443,7 +1579,7 @@
   .rv-cover { width: 56px; height: 84px; object-fit: cover; border-radius: 5px; flex-shrink: 0; background: var(--surf); box-shadow: 0 1px 4px rgba(0,0,0,0.12); display: block; }
   .rv-cover--empty { display: flex; align-items: center; justify-content: center; background: var(--surf); color: var(--hint); box-shadow: none; }
   .rv-book-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .rv-book-title { font-weight: 700; font-size: 0.9rem; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rv-book-title { font-family: var(--dm); font-weight: 700; font-size: 0.9rem; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0.02em; }
   .rv-book-author { font-size: 0.75rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rv-body { display: flex; flex-direction: column; gap: 0.625rem; }
   .rv-reactions { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }

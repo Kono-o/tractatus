@@ -183,7 +183,7 @@
   .rld-month { margin: 0; }
   .rld-label { font-family: var(--ui); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hint); padding: 0.3rem 0.4rem; background: var(--surf); border-radius: 5px; margin: 0; }
   .rld-entries { display: flex; flex-direction: column; }
-  .rld-entry { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.5rem; border-bottom: 0.5px solid var(--border); transition: background 0.15s ease; cursor: pointer; }
+  .rld-entry { display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 0.5rem; border-bottom: 0.5px solid var(--border); transition: background 0.15s ease; cursor: pointer; }
   .rld-entry:last-child { border-bottom: 0.5px solid var(--border); }
   .rld-entry:hover { background: var(--surf); }
   .rld-day { display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; color: var(--hint); width: 2rem; height: 2rem; flex-shrink: 0; background: var(--surf); border-radius: 6px; }
@@ -192,7 +192,7 @@
   .rld-cover--img { position: absolute; inset: 0; width: 100%; height: 100%; }
   .rld-cover--empty { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 3rem; background: var(--surf); border: 0.5px solid var(--border); color: var(--hint); box-shadow: none; border-radius: 3px; }
   .rld-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; justify-content: center; }
-  .rld-title { font-family: var(--ui); font-size: 0.8rem; font-weight: 600; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rld-title { font-family: var(--dm); font-size: 0.9rem; font-weight: 700; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0.02em; }
   .rld-reactions { display: flex; align-items: center; gap: 3px; margin-top: 1px; }
   .rld-stars { display: inline-flex; gap: 1px; }
   .rld-star { display: block; }
@@ -219,7 +219,7 @@
   .rvw-cover--img { position: absolute; inset: 0; width: 100%; height: 100%; }
   .rvw-cover--empty { display: flex; align-items: center; justify-content: center; width: 56px; height: 84px; background: var(--surf); color: var(--hint); box-shadow: none; border-radius: 5px; }
   .rvw-book-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .rvw-book-title { font-weight: 700; font-size: 0.9rem; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rvw-book-title { font-family: var(--dm); font-weight: 700; font-size: 0.9rem; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0.02em; }
   .rvw-book-author { font-size: 0.75rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rvw-body { display: flex; flex-direction: column; gap: 0.625rem; }
   .rvw-reactions { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }

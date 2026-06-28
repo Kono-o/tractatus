@@ -2163,6 +2163,33 @@
       .subscribe();
   });
 
+  // === Realtime library logs updates ===
+  let libraryLogsChannel: ReturnType<typeof supabase.channel> | null = null;
+
+  $effect(() => {
+    if (!currentUser) {
+      if (libraryLogsChannel) {
+        supabase.removeChannel(libraryLogsChannel);
+        libraryLogsChannel = null;
+      }
+      return;
+    }
+
+    libraryLogsChannel = supabase.channel('library-logs-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'reading_logs', filter: `user_id=eq.${currentUser.id}` },
+        () => { void loadLibraryLogs(); },
+      )
+      .subscribe();
+
+    return () => {
+      if (libraryLogsChannel) {
+        supabase.removeChannel(libraryLogsChannel);
+        libraryLogsChannel = null;
+      }
+    };
+  });
+
   onDestroy(() => {
     if (feedChannel) {
       supabase.removeChannel(feedChannel);
@@ -2171,6 +2198,10 @@
     if (feedRefreshTimer) {
       clearTimeout(feedRefreshTimer);
       feedRefreshTimer = null;
+    }
+    if (libraryLogsChannel) {
+      supabase.removeChannel(libraryLogsChannel);
+      libraryLogsChannel = null;
     }
   });
 
@@ -2296,7 +2327,7 @@
             class:pub-header-meta-chip--public={isPublished}
             onclick={togglePublish}
           >
-            {isPublished ? 'Public' : 'Draft'}
+            {isPublished ? 'Public' : 'Private'}
           </button>
         {/if}
         <button
@@ -2579,63 +2610,61 @@
             {/if}
           </div>
         {:else}
-          <div class="lib-essay-list">
+          <div class="le-list">
             {#each filteredLibraryEssays as essay (essay.id)}
               {@const excerpt = libraryExcerpts.get(essay.id)}
-              <div class="lib-essay-card" class:lib-essay-card--public={essay.is_public}>
-                <button
-                  type="button"
-                  class="lib-essay-body"
-                  onclick={() => openEditorForEssay(essay)}
-                >
-                  <div class="lib-essay-top">
-                    <div class="lib-essay-title">{essay.title || 'Untitled'}</div>
+              <div class="le-card" class:le-card--public={essay.is_public} onclick={() => openEditorForEssay(essay)} role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') openEditorForEssay(essay); }}>
+                <span class="le-icon"><Pencil class="size-3.5" aria-hidden="true" /></span>
+                <div class="le-info">
+                  <div class="le-top">
+                    <span class="le-title">{essay.title || 'Untitled'}</span>
                     <span
-                      class="lib-essay-badge"
-                      class:lib-essay-badge--public={essay.is_public}
+                      class="le-badge"
+                      class:le-badge--public={essay.is_public}
                       role="button"
                       tabindex="0"
                       onclick={(e) => { e.stopPropagation(); toggleLibraryPublish(essay); }}
                       onkeydown={(e) => e.key === 'Enter' && toggleLibraryPublish(essay)}
                     >
-                      {essay.is_public ? 'Public' : 'Draft'}
+                      {essay.is_public ? 'Public' : 'Private'}
                     </span>
                   </div>
                   {#if excerpt}
-                    <div class="lib-essay-excerpt">{@html excerpt}</div>
+                    <div class="le-excerpt">{@html excerpt}</div>
                   {/if}
-                  <div class="lib-essay-footer">
+                  <div class="le-footer">
                     <span>{countWords(essay.content)} words · {fmtReadTime(estimateReadTimeMinutes(essay.content))}</span>
-                    {#if essay.is_public && essay.author_username}
-                      <span role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }} class="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors ml-1.5 p-1.5 relative" aria-label="Copy link">
-                        {#if feedLinkCopiedId === essay.id}
-                          <span class="absolute right-full top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 mr-1.5">Copied!</span>
-                        {/if}
-                        <Link class="size-4" aria-hidden="true" />
-                      </span>
-                    {/if}
-                    <span class="lib-essay-dot" aria-hidden="true">·</span>
+                    <span class="le-dot" aria-hidden="true">·</span>
                     <span>{formatFeedDate(essay.updated_at)}</span>
                     {#if essay.is_public && essay.published_at}
-                      <span class="lib-essay-dot" aria-hidden="true">·</span>
+                      <span class="le-dot" aria-hidden="true">·</span>
                       <span>Published {formatFeedDate(essay.published_at)}</span>
                     {/if}
+                    <span class="le-spacer"></span>
+                    {#if essay.is_public && essay.author_username}
+                      <span class="le-link-btn" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); const url = `/@${encodeURIComponent(essay.author_username!)}/${encodeURIComponent(essay.slug)}/`; void navigator.clipboard.writeText(window.location.origin + url); feedLinkCopiedId = essay.id; clearTimeout(feedLinkCopiedTimer); feedLinkCopiedTimer = setTimeout(() => { feedLinkCopiedId = null; }, 1500); } }}>
+                        {#if feedLinkCopiedId === essay.id}
+                          <span class="le-copied-tip">Copied!</span>
+                        {/if}
+                        <Link class="size-3" aria-hidden="true" />
+                      </span>
+                    {/if}
+                    <button
+                      type="button"
+                      class="le-delete"
+                      class:le-delete--confirm={libraryDeleteConfirmId === essay.id}
+                      aria-label={libraryDeleteConfirmId === essay.id ? 'Confirm delete' : 'Delete essay'}
+                      onclick={(e) => { e.stopPropagation(); handleLibraryDelete(essay.id); }}
+                      onblur={clearLibraryDeleteConfirm}
+                    >
+                      {#if libraryDeleteConfirmId === essay.id}
+                        Sure?
+                      {:else}
+                        <Trash2 class="size-3" aria-hidden="true" />
+                      {/if}
+                    </button>
                   </div>
-                </button>
-                <button
-                  type="button"
-                  class="lib-essay-delete"
-                  class:lib-essay-delete--confirm={libraryDeleteConfirmId === essay.id}
-                  aria-label={libraryDeleteConfirmId === essay.id ? 'Confirm delete' : 'Delete essay'}
-                  onclick={() => handleLibraryDelete(essay.id)}
-                  onblur={clearLibraryDeleteConfirm}
-                >
-                  {#if libraryDeleteConfirmId === essay.id}
-                    Sure?
-                  {:else}
-                    <Trash2 class="size-3" aria-hidden="true" />
-                  {/if}
-                </button>
+                </div>
               </div>
             {/each}
           </div>
