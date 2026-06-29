@@ -2572,14 +2572,7 @@
 
   {#if viewMode === 'diary'}
     <div class="pub-scroll no-scrollbar">
-      {#if currentUser}
-        <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} onaddbook={toggleSearch} initialPublicLogs={data.publicReadingLogs} currentUserId={currentUser?.id} onDelete={performLibraryLogDelete} />
-      {:else}
-        <div class="pub-empty">
-          <div class="pub-empty-title">Books</div>
-          <div class="pub-empty-hint">Sign in to log your reading.</div>
-        </div>
-      {/if}
+      <DiaryPanel searchQuery={diarySearchQuery} searchExpanded={searchExpanded} onselect={() => { diarySearchQuery = ''; searchQuery = ''; }} onaddbook={toggleSearch} initialPublicLogs={data.publicReadingLogs} currentUserId={currentUser?.id} onDelete={performLibraryLogDelete} />
     </div>
   {:else if currentUser && viewMode === 'library'}
     <div class="pub-scroll no-scrollbar">
@@ -2685,6 +2678,7 @@
         {/if}
       {/if}
     </div>
+    <DiaryPanel minimal={true} currentUserId={currentUser?.id} onDelete={performLibraryLogDelete} />
   {:else}
     <div
       class="pub-scroll no-scrollbar"
@@ -2837,21 +2831,7 @@
       onclick={(e) => e.stopPropagation()}
     >
       <div class="settings-panel-header">
-        <div class="settings-panel-header__brand-row">
-          <button
-            type="button"
-            class="settings-panel-brand__eye"
-            onclick={toggleLogoEye}
-            aria-label={logoEyeOpen ? 'Close eye' : 'Open eye'}
-          >
-            {#if logoEyeOpen}
-              <Eye class="settings-panel-brand__eye-icon" aria-hidden="true" />
-            {:else}
-              <EyeClosed class="settings-panel-brand__eye-icon" aria-hidden="true" />
-            {/if}
-          </button>
-          <span class="settings-panel-brand__lift">Tractatus</span>
-        </div>
+        <span class="auth-overlay-title">Sign in</span>
         <button
           type="button"
           aria-label="Close"

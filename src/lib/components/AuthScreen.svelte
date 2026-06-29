@@ -169,7 +169,7 @@
           onAuthenticated?.();
         } else {
           setAuthSuccess(
-            'Account created. If sign-in fails, disable “Confirm email” in Supabase Auth settings (username accounts have no inbox).',
+            'Account created. If sign-in fails, disable "Confirm email" in Supabase Auth settings (username accounts have no inbox).',
           );
           authMode = 'signin';
           authPassword = '';

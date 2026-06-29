@@ -134,17 +134,28 @@ html.theme-transitioning * {
   color: #d4b87a;
   border-color: #5a4a30;
 }
-.dark .settings-panel-password-save-btn.auth-submit-btn--error,
+.dark .settings-panel-password-save-btn.auth-submit-btn--error {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-color: var(--error-border);
+}
+.dark .settings-panel-password-save-btn.auth-submit-btn--success {
+  background: var(--success-bg);
+  color: var(--success-text);
+  border-color: var(--success-border);
+}
 .dark .auth-screen-submit--error {
   background: var(--error-bg);
   color: var(--error-text);
   border-color: var(--error-border);
 }
-.dark .settings-panel-password-save-btn.auth-submit-btn--success,
 .dark .auth-screen-submit--success {
   background: var(--success-bg);
   color: var(--success-text);
   border-color: var(--success-border);
+}
+.dark .auth-screen-card {
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
 }
 .dark .settings-panel-action-btn--signout {
   background: #2a241a;
@@ -223,9 +234,6 @@ html.theme-transitioning * {
 .dark .pub-header-search-input {
   background-color: var(--surf);
   color: var(--text);
-}
-.dark .auth-screen-card {
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
 }
 .dark .pub-write-fab {
   box-shadow: 0 2px 10px rgb(0 0 0 / 0.4);
@@ -775,7 +783,7 @@ span.boot-panel-placeholder::after,
   min-height: 1.75rem;
   padding: var(--sp-pad);
   border-bottom: 1px solid var(--border);
-  background-color: #f1ede3;
+  background: var(--surf);
 }
 
 .settings-panel-header__title {
@@ -1620,6 +1628,14 @@ span.boot-panel-placeholder::after,
   text-transform: none;
 }
 
+.auth-overlay-title {
+  font-family: var(--ui);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text);
+  padding-left: 0.25rem;
+}
+
 .auth-panel-card {
   width: min(100%, 300px);
   max-width: 300px;
@@ -1667,7 +1683,7 @@ span.boot-panel-placeholder::after,
 .auth-screen-alert {
   max-width: 18rem;
   margin: 0;
-  padding: 0.625rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
   border: 1px solid #d4b87a;
   background-color: #f4e9d2;
@@ -1696,7 +1712,7 @@ span.boot-panel-placeholder::after,
 .auth-screen-card-header {
   padding: 0.75rem;
   border-bottom: 0.5px solid var(--border);
-  background: #f1ede3;
+  background: var(--surf);
 }
 
 .auth-screen-mode {

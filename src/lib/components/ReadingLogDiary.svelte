@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ReadingLog } from '$lib/db';
   import { Heart, BookMarked, Trash2 } from '@lucide/svelte';
+  import { triggerBookOverlay } from '$lib/book-overlay.svelte';
 
   let {
     logs = [],
@@ -122,7 +123,7 @@
         <div class="rvw-head">
           <span class="rvw-head-date">{formatLogDate(viewedLog.created_at)}</span>
         </div>
-        <div class="rvw-book">
+        <div class="rvw-book" role="button" tabindex="0" onclick={() => { const data = { id: viewedLog.book_id, title: viewedLog.title, author: viewedLog.author, coverUrl: viewedLog.cover_url }; closeReview(); triggerBookOverlay(data); }} onkeydown={(e) => { if (e.key === 'Enter') { const data = { id: viewedLog.book_id, title: viewedLog.title, author: viewedLog.author, coverUrl: viewedLog.cover_url }; closeReview(); triggerBookOverlay(data); }}}>
           <div class="rvw-cover-wrap">
             <div class="rvw-cover rvw-cover--empty" aria-hidden="true"><BookMarked class="size-6" /></div>
             {#if viewedLog.cover_url}
@@ -213,7 +214,9 @@
   .rvw-head-date { color: var(--hint); }
   .rvw-delete-btn { margin-left: auto; background: none; border: none; cursor: pointer; color: #ef4444; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 0; transition: opacity 0.15s; }
   .rvw-delete-btn:hover { opacity: 0.7; }
-  .rvw-book { display: flex; gap: 0.75rem; padding: 0.75rem; background: var(--surf); border-radius: 10px; align-items: center; flex-shrink: 0; }
+  .rvw-book { display: flex; gap: 0.75rem; padding: 0.75rem; background: var(--surf); border-radius: 10px; align-items: center; flex-shrink: 0; cursor: pointer; transition: background 0.15s ease, box-shadow 0.15s ease; outline: none; }
+  .rvw-book:hover { background: color-mix(in srgb, var(--accent) 4%, var(--surf)); box-shadow: 0 0 0 0.5px var(--border); }
+  .rvw-book:focus-visible { box-shadow: 0 0 0 1.5px var(--ink); }
   .rvw-cover-wrap { position: relative; flex-shrink: 0; width: 56px; }
   .rvw-cover { width: 56px; height: 84px; object-fit: cover; border-radius: 5px; box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
   .rvw-cover--img { position: absolute; inset: 0; width: 100%; height: 100%; }

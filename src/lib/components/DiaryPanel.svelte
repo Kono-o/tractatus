@@ -55,6 +55,7 @@
   import CalendarPopover from './CalendarPopover.svelte';
   import GeneratedAvatar from './GeneratedAvatar.svelte';
   import { readingList as sharedList, addToReadingList as sharedAdd, removeFromReadingList as sharedRemove } from '$lib/reading-list.svelte';
+  import { setBookHandler } from '$lib/book-overlay.svelte';
 
   const PF_CARD_HEIGHT = 120;
   const PF_COVER_W = 80;
@@ -86,6 +87,7 @@
     initialPublicLogs,
     currentUserId = null,
     onDelete,
+    minimal = false,
   }: {
     searchQuery?: string;
     onselect?: () => void;
@@ -94,6 +96,7 @@
     initialPublicLogs?: ReadingLogWithAuthor[];
     currentUserId?: string | null;
     onDelete?: (logId: string) => void;
+    minimal?: boolean;
   } = $props();
 
   // ── Carousel collapse ──
@@ -251,6 +254,48 @@
         logsFallbackTimer = undefined;
       }
     };
+  });
+
+  function openBookByOlid(olid: string, known?: { title?: string; author?: string | null; coverUrl?: string | null }) {
+    selectedBook = { id: olid, title: known?.title ?? '', author: known?.author ?? null, coverUrl: known?.coverUrl ?? null, year: null, editions: null, publisher: null, first_publish_year: null };
+    bookYear = null;
+    bookSelected = true;
+    editingLog = null;
+    bookDetails = null;
+    bookDetailsLoading = true;
+    rereviewed = false;
+    clearForm();
+
+    const matching = logs.filter(l => l.book_id === olid);
+    if (matching.length > 0) {
+      populateFormFromLog(matching[0]);
+    }
+
+    void loadBookDetails(olid);
+
+    fetchBookByOlid(olid).then(fullBook => {
+      if (fullBook) {
+        selectedBook = {
+          ...selectedBook,
+          ...(fullBook.title ? { title: fullBook.title } : {}),
+          ...(fullBook.author ? { author: fullBook.author } : {}),
+          ...(fullBook.coverUrl ? { coverUrl: fullBook.coverUrl } : {}),
+          year: fullBook.year ?? selectedBook.year,
+          ...(fullBook.publisher ? { publisher: fullBook.publisher } : {}),
+          first_publish_year: fullBook.first_publish_year ?? selectedBook.first_publish_year,
+          ...(fullBook.editions ? { editions: fullBook.editions } : {}),
+          ...(fullBook.isbn ? { isbn: fullBook.isbn } : {}),
+          ...(fullBook.pages ? { pages: fullBook.pages } : {}),
+          ...(fullBook.publish_date ? { publish_date: fullBook.publish_date } : {}),
+        };
+        if (fullBook.year) bookYear = fullBook.year;
+      }
+    });
+  }
+
+  $effect(() => {
+    setBookHandler((data) => openBookByOlid(data.id, data));
+    return () => setBookHandler(null);
   });
 
   function onTrackTouchStart(e: TouchEvent) {
@@ -552,7 +597,7 @@
 
   async function fetchBookByOlid(olid: string): Promise<BookResult | null> {
     try {
-      const cleanId = olid.replace('/works/', '');
+      const cleanId = olid.replace(/^\/(works|books)\//, '');
       let title: string | null = null;
       let author: string | null = null;
       let coverUrl: string | null = null;
@@ -745,23 +790,40 @@
   async function loadBookDetails(olid: string) {
     bookDetailsLoading = true;
     try {
-      const cleanId = olid.replace('/works/', '');
-      const res = await fetch(`https://openlibrary.org/works/${cleanId}.json`);
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      const data = await res.json();
-      bookDetails = data as BookDetails;
-      if (data.first_publish_year && !bookYear) {
-        bookYear = data.first_publish_year;
-      }
-      if (!bookYear) {
-        try {
-          const sr = await fetch(`https://openlibrary.org/search.json?q=key:${cleanId}&limit=1&fields=first_publish_year`);
-          if (sr.ok) {
-            const sd = await sr.json();
-            const fpy = sd.docs?.[0]?.first_publish_year;
-            if (fpy) bookYear = fpy;
+      const prefix = olid.startsWith('/books/') ? '/books/' : olid.startsWith('/works/') ? '/works/' : null;
+      const cleanId = prefix ? olid.slice(prefix.length) : olid;
+      const typeEndpoint = prefix === '/books/' ? 'books' : 'works';
+
+      const res = await fetch(`https://openlibrary.org/${typeEndpoint}/${cleanId}.json`);
+      if (res.ok) {
+        const data = await res.json();
+        bookDetails = data as BookDetails;
+        if (data.first_publish_year && !bookYear) {
+          bookYear = data.first_publish_year;
+        }
+      } else {
+        const sr = await fetch(
+          `https://openlibrary.org/search.json?q=key:${cleanId}&limit=1&fields=key,first_publish_year,subject,subject_place,subject_time,subject_person,description`
+        );
+        if (sr.ok) {
+          const sd = await sr.json();
+          const doc = sd.docs?.[0];
+          if (doc) {
+            bookDetails = {
+              subjects: doc.subject ?? [],
+              subject_places: doc.subject_place ?? [],
+              subject_times: doc.subject_time ?? [],
+              subject_people: doc.subject_person ?? [],
+              first_publish_year: doc.first_publish_year ?? null,
+              description: doc.description ?? null,
+            } as BookDetails;
+            if (!bookYear && doc.first_publish_year) bookYear = doc.first_publish_year;
+          } else {
+            throw new Error('not found in search');
           }
-        } catch {}
+        } else {
+          throw new Error(`search API returned ${sr.status}`);
+        }
       }
     } catch (e) {
       console.warn('[diary] failed to load book details', e);
@@ -876,6 +938,8 @@
 </script>
 
 <div class="diary-panel">
+  {#if !minimal}
+    {#if currentUserId}
     <div class="rl-section" class:rl-section--collapsed={carouselCollapsed}>
     {#if sharedList.items.length > 0 || !searchQuery}
       <div class="rl-header">
@@ -999,8 +1063,9 @@
       </div>
       </div>
       </div>
-  {/if}
+    {/if}
     </div>
+    {/if}
 
   {#if publicReadingLogsLoaded && publicReadingLogs.length > 0}
     <div class="pf-sep"></div>
@@ -1098,6 +1163,7 @@
       </div>
     </div>
   {/if}
+  {/if}
 
   {#if selectedBook}
     <div class="overlay" transition:fade={{ duration: 150 }} onclick={closeBookInfo} role="dialog" aria-modal="true" aria-label="Book details">
@@ -1123,6 +1189,7 @@
                   <span>{selectedBook.publisher}</span>
                 {/if}
               </div>
+            {#if currentUserId}
             <div class="book-actions">
               {#if sharedList.bookIds.has(selectedBook.id)}
                 <button type="button" class="book-btn book-btn--remove" onclick={() => removeFromReadingList(selectedBook.id)}><X class="size-3.5" aria-hidden="true" />Remove from List</button>
@@ -1130,6 +1197,7 @@
                 <button type="button" class="book-btn book-btn--add" onclick={() => addToReadingList(selectedBook)}><Plus class="size-3.5" aria-hidden="true" />Add to List</button>
               {/if}
             </div>
+            {/if}
           </div>
         </div>
 
